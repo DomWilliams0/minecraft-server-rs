@@ -1,4 +1,5 @@
 use crate::error::{McError, McResult};
+use crate::packet::{PacketBody, PacketHandshake, ServerBound};
 
 pub struct Handshake;
 
@@ -16,7 +17,7 @@ impl Default for Connection {
 }
 
 impl Connection {
-    pub fn handle(self, packet: &[u8]) -> McResult<Connection> {
+    pub fn handle(self, packet: PacketBody) -> McResult<Connection> {
         match self {
             Connection::Handshake(state) => state.handle(packet),
             Connection::Status(state) => state.handle(packet),
@@ -25,19 +26,21 @@ impl Connection {
 }
 
 impl Handshake {
-    pub fn handle(self, packet: &[u8]) -> McResult<Connection> {
-        let next_state = 1;
+    pub fn handle(self, packet: PacketBody) -> McResult<Connection> {
+        let handshake = PacketHandshake::read(packet)?;
 
-        match next_state {
+        use log::*;
+        warn!("nice {:?}", handshake);
+        match handshake.next_state.value() {
             1 => Ok(Connection::Status(Status)),
             2 => unimplemented!(),
-            _ => Err(McError::BadNextState(next_state)),
+            x => Err(McError::BadNextState(x)),
         }
     }
 }
 
 impl Status {
-    pub fn handle(self, packet: &[u8]) -> McResult<Connection> {
+    pub fn handle(self, packet: PacketBody) -> McResult<Connection> {
         todo!()
     }
 }

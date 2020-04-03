@@ -2,5 +2,6 @@
 
 members = [
     "mc",
+    "mc/mc-packet-derive",
     "server"
  ]

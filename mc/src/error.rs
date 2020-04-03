@@ -1,3 +1,4 @@
+use crate::packet::PacketId;
 use std::io;
 
 pub type McResult<T> = Result<T, McError>;
@@ -8,4 +9,9 @@ pub enum McError {
     BadVarInt,
     BadPacketLength(usize),
     BadNextState(i32),
+    BadString,
+    UnexpectedPacket {
+        expected: PacketId,
+        actual: PacketId,
+    },
 }

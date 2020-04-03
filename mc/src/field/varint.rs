@@ -3,9 +3,10 @@ use byteorder::{ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 use std::ops::BitAnd;
 
-pub struct VarInt(i32);
+#[derive(Debug)]
+pub struct VarIntField(i32);
 
-impl VarInt {
+impl VarIntField {
     pub fn read<R: Read>(r: &mut R) -> McResult<Self> {
         let mut out = 0u32;
         let mut n = 0;
@@ -67,11 +68,11 @@ impl VarInt {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::VarInt;
+    use crate::field::VarIntField;
     use std::io::Cursor;
 
     fn assert_varint(val: i32, bytes: &[u8]) {
-        let varint = VarInt::new(val);
+        let varint = VarIntField::new(val);
         assert_eq!(varint.value(), val);
 
         // encode to bytes
@@ -85,7 +86,7 @@ mod tests {
 
         // decode back to int
         let mut cursor = Cursor::new(encoded);
-        let decoded = VarInt::read(&mut cursor).unwrap();
+        let decoded = VarIntField::read(&mut cursor).unwrap();
         assert_eq!(decoded.value(), val);
         bytes
             .iter()

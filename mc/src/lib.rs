@@ -1,5 +1,5 @@
 pub mod connection;
 
 pub mod error;
-mod packet;
-pub mod types;
+pub mod field;
+pub mod packet;
