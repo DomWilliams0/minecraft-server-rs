@@ -1,4 +1,5 @@
 use proc_macro::TokenStream;
+use proc_macro2::Ident;
 use proc_macro_error::*;
 use quote::quote;
 use syn::export::ToTokens;
@@ -7,45 +8,41 @@ use syn::spanned::Spanned;
 use proc_macro_error::proc_macro2::TokenTree;
 use syn::{Data, DeriveInput, Type};
 
-#[proc_macro_derive(ServerBoundPacket, attributes(packet_id))]
-#[proc_macro_error]
-pub fn packet(input: TokenStream) -> TokenStream {
-    let item: DeriveInput = syn::parse(input.clone()).expect("failed to parse input");
+fn extract_packet_id(item: &DeriveInput) -> i32 {
+    let span = item.span();
+    let attribute = item
+        .attrs
+        .iter()
+        .find(|a| {
+            let ident = a.path.get_ident().map(|i| i.to_string());
+            matches!(ident.as_deref(), Some("packet_id"))
+        })
+        .unwrap_or_else(|| abort!(span, "expected packet_id attribute"));
 
-    let packet_id = {
-        let span = item.span();
-        let attribute = item
-            .attrs
-            .into_iter()
-            .filter(|a| {
-                let ident = a.path.get_ident().map(|i| i.to_string());
-                matches!(ident.as_deref(), Some("packet_id"))
-            })
-            .next()
-            .unwrap_or_else(|| abort!(span, "expected packet_id attribute"));
+    let literal = attribute
+        .tokens
+        .to_owned()
+        .into_iter()
+        .filter_map(|t| match t {
+            TokenTree::Literal(lit) => Some(lit),
+            _ => None,
+        })
+        .next()
+        .unwrap_or_else(|| abort!(span, "expected literal for packet id"));
 
-        let literal = attribute
-            .tokens
-            .into_iter()
-            .filter_map(|t| match t {
-                TokenTree::Literal(lit) => Some(lit),
-                _ => None,
-            })
-            .next()
-            .unwrap_or_else(|| abort!(span, "expected literal for packet id"));
+    let integer_literal: syn::LitInt =
+        syn::parse2(literal.into_token_stream()).expect("expected integer literal for packet id");
+    let integer: i32 = integer_literal.base10_parse().expect("bad integer");
+    integer
+}
 
-        let integer_literal: syn::LitInt = syn::parse2(literal.into_token_stream())
-            .expect("expected integer literal for packet id");
-        let integer: i32 = integer_literal.base10_parse().expect("bad integer");
-        integer
-    };
-
-    let r#struct = match item.data {
+fn extract_fields(item: &DeriveInput) -> (Vec<&Ident>, impl Iterator<Item = &Ident>) {
+    let r#struct = match &item.data {
         Data::Struct(r#struct) => r#struct,
         _ => abort_call_site!("Packet must be a struct"),
     };
 
-    let field_names: Vec<&proc_macro2::Ident> = r#struct
+    let field_names = r#struct
         .fields
         .iter()
         .map(|f| f.ident.as_ref().expect("expected field identifier"))
@@ -56,7 +53,39 @@ pub fn packet(input: TokenStream) -> TokenStream {
         _ => abort!(f.span(), "field should be a field type"),
     });
 
-    let name = item.ident;
+    (field_names, field_types)
+}
+
+fn impl_display(name: &Ident, field_names: &[&Ident]) -> proc_macro2::TokenStream {
+    let out = quote! {
+        impl Display for #name {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}(", stringify!(#name))?;
+
+                let mut sep = "";
+                #( write!(f, "{}{}={}",
+                    sep,
+                    stringify!(#field_names),
+                    DisplayableField(&self.#field_names .value())
+                )?; sep = ", "; )*
+
+                write!(f, ")")
+            }
+        }
+    };
+    out
+}
+
+#[proc_macro_derive(ServerBoundPacket, attributes(packet_id))]
+#[proc_macro_error]
+pub fn server_packet(input: TokenStream) -> TokenStream {
+    let item: DeriveInput = syn::parse(input.clone()).expect("failed to parse input");
+
+    let packet_id = extract_packet_id(&item);
+    let (field_names, field_types) = extract_fields(&item);
+    let name = &item.ident;
+    // let test_mod = format_ident!("test_{}", name);
+    let display = impl_display(name, &field_names);
     let result = quote! {
         impl Packet for #name {
             fn id() -> PacketId { #packet_id }
@@ -65,24 +94,89 @@ pub fn packet(input: TokenStream) -> TokenStream {
         impl ServerBound for #name {
 
             fn read(body: PacketBody) -> McResult<Self> {
+                if body.id != Self::id() {
+                    return Err(McError::UnexpectedPacket {
+                        expected: Self::id(),
+                        actual: body.id,
+                    });
+                }
 
-            if body.id != Self::id() {
-                return Err(McError::UnexpectedPacket {
-                    expected: Self::id(),
-                    actual: body.id,
-                });
+                let mut cursor = Cursor::new(body.body);
+
+                #( let #field_names = <#field_types>::read(&mut cursor)?;)*
+
+                let packet = Self {
+                    #( #field_names ),*
+                };
+
+                let full_len = cursor.get_ref().len();
+                let read_len = cursor.position() as usize;
+
+                trace!("read packet id {:#x} of {} bytes: {}", body.id, read_len, packet);
+
+                if read_len != full_len {
+                    Err(McError::FullPacketNotRead {
+                        length: full_len,
+                        read: read_len,
+                    })
+                } else {
+                    Ok(packet)
+                }
             }
+        }
 
-            let mut cursor = Cursor::new(body.body);
+        #display
+    };
 
-            #( let #field_names = <#field_types>::read(&mut cursor)?;)*
+    result.into()
+}
 
-            Ok(Self {
-                #( #field_names ),*
-            })
+#[proc_macro_derive(ClientBoundPacket, attributes(packet_id))]
+#[proc_macro_error]
+pub fn client_packet(input: TokenStream) -> TokenStream {
+    let item: DeriveInput = syn::parse(input.clone()).expect("failed to parse input");
+
+    let packet_id = extract_packet_id(&item);
+    let (field_names, _field_types) = extract_fields(&item);
+
+    let name = &item.ident;
+    // let test_mod = format_ident!("test_{}", name);
+    let display = impl_display(name, &field_names);
+    let result = quote! {
+        impl Packet for #name {
+            fn id() -> PacketId { #packet_id }
+        }
+
+        impl ClientBound for #name {
+
+            fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
+                let packet_id = VarIntField::new(Self::id());
+                let len = {
+                    let mut len = 0;
+                    len += packet_id.size();
+
+                    #( len += self.#field_names.size(); )*
+
+                    VarIntField::new(len as i32)
+                };
+
+                trace!("sending packet id {:#x} of {} bytes: {}", Self::id(), len.value(), self);
+
+                len.write(w)?;
+                packet_id.write(w)?;
+
+                #( self.#field_names.write(w)?; )*
+
+                Ok(())
 
             }
         }
+
+        #display
+        // #[cfg(test)]
+        // mod #test_mod {
+        //
+        // }
     };
 
     result.into()

@@ -1,19 +1,37 @@
 use crate::error::{McError, McResult};
-use byteorder::{ReadBytesExt, WriteBytesExt};
+use crate::field::Field;
+use byteorder::ReadBytesExt;
 use std::io::{Read, Write};
 use std::ops::BitAnd;
 
-#[derive(Debug)]
-pub struct VarIntField(i32);
+#[derive(Debug, Copy, Clone)]
+pub struct VarIntField {
+    value: i32,
+    bytes: [u8; 5],
+    byte_count: u8,
+}
 
-impl VarIntField {
-    pub fn read<R: Read>(r: &mut R) -> McResult<Self> {
+impl Field for VarIntField {
+    type Displayable = i32;
+
+    fn value(&self) -> &Self::Displayable {
+        &self.value
+    }
+
+    fn size(&self) -> usize {
+        self.byte_count as usize
+    }
+
+    fn read<R: Read>(r: &mut R) -> McResult<Self> {
         let mut out = 0u32;
         let mut n = 0;
+        let mut bytes = [0u8; 5];
 
         loop {
             let byte = r.read_u8().map_err(McError::Io)?;
-            out |= (((byte & 0x7f) as u32) << (7 * n)) as u32;
+            bytes[n] = byte;
+
+            out |= ((byte & 0x7f) as u32) << (7 * n as u32);
             n += 1;
 
             if byte.bitand(0x80) == 0 {
@@ -24,29 +42,34 @@ impl VarIntField {
         if n > 5 {
             Err(McError::BadVarInt)
         } else {
-            let val = unsafe { std::mem::transmute(out) };
-            Ok(Self(val))
+            let value = unsafe { std::mem::transmute(out) };
+            Ok(Self {
+                value,
+                bytes,
+                byte_count: n as u8,
+            })
         }
     }
-
-    pub fn new(val: i32) -> Self {
-        Self(val)
+    fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
+        w.write_all(self.bytes()).map_err(McError::Io)
     }
+}
 
-    pub fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
+impl VarIntField {
+    pub fn new(value: i32) -> Self {
         let mut n = 0;
-        // let mut val: u32 = unsafe{std::mem::transmute(self.0)};
-        let mut val: u32 = self.0 as u32;
+        let mut val = value as u32;
+        let mut bytes = [0u8; 5];
 
         loop {
             let mut next: u8 = (val & 0x7f) as u8;
-            val >>= 7;
 
+            val >>= 7;
             if val > 0 {
                 next |= 0x80;
             }
 
-            w.write_u8(next).map_err(McError::Io)?;
+            bytes[n] = next;
 
             n += 1;
             if val == 0 {
@@ -54,26 +77,32 @@ impl VarIntField {
             }
         }
 
-        if n > 5 {
-            Err(McError::BadVarInt)
-        } else {
-            Ok(())
+        assert!(n >= 1 && n <= 5, "somehow i32 is bigger than i32");
+        Self {
+            value,
+            bytes,
+            byte_count: n as u8,
         }
     }
 
     pub fn value(&self) -> i32 {
-        self.0
+        self.value
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes[..self.byte_count as usize]
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::field::VarIntField;
+    use crate::field::{Field, VarIntField};
     use std::io::Cursor;
 
     fn assert_varint(val: i32, bytes: &[u8]) {
         let varint = VarIntField::new(val);
         assert_eq!(varint.value(), val);
+        assert_eq!(varint.bytes(), bytes);
 
         // encode to bytes
         let mut cursor = Cursor::new(vec![0u8; 5]);
@@ -88,6 +117,7 @@ mod tests {
         let mut cursor = Cursor::new(encoded);
         let decoded = VarIntField::read(&mut cursor).unwrap();
         assert_eq!(decoded.value(), val);
+        assert_eq!(decoded.bytes(), bytes);
         bytes
             .iter()
             .zip(&cursor.into_inner())
@@ -104,5 +134,17 @@ mod tests {
         assert_varint(2_147_483_647, &[0xff, 0xff, 0xff, 0xff, 0x07]);
         assert_varint(-1, &[0xff, 0xff, 0xff, 0xff, 0x0f]);
         assert_varint(-2_147_483_648, &[0x80, 0x80, 0x80, 0x80, 0x08]);
+    }
+    #[test]
+    fn varint_stream() {
+        let mut stream = Cursor::new(vec![1u8, 1u8, 1u8]);
+        let varints: Vec<i32> = (0..3)
+            .map(|i| {
+                VarIntField::read(&mut stream)
+                    .expect(&format!("failed varint #{}", i))
+                    .value()
+            })
+            .collect();
+        assert_eq!(varints, vec![1, 1, 1]);
     }
 }
