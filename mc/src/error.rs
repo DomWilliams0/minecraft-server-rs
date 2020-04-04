@@ -21,5 +21,6 @@ pub enum McError {
         length: usize,
         read: usize,
     },
-    Disconnected,
+    PleaseDisconnect,
+    MutexUnlock,
 }

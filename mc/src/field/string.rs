@@ -1,5 +1,5 @@
 use crate::error::{McError, McResult};
-use crate::field::{Field, VarIntField};
+use crate::field::*;
 use std::convert::TryFrom;
 use std::io::{Read, Write};
 

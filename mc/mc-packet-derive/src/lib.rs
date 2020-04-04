@@ -88,15 +88,15 @@ pub fn server_packet(input: TokenStream) -> TokenStream {
     let display = impl_display(name, &field_names);
     let result = quote! {
         impl Packet for #name {
-            fn id() -> PacketId { #packet_id }
+            const ID: PacketId = #packet_id;
         }
 
         impl ServerBound for #name {
 
             fn read(body: PacketBody) -> McResult<Self> {
-                if body.id != Self::id() {
+                if body.id != Self::ID {
                     return Err(McError::UnexpectedPacket {
-                        expected: Self::id(),
+                        expected: Self::ID,
                         actual: body.id,
                     });
                 }
@@ -144,13 +144,13 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
     let display = impl_display(name, &field_names);
     let result = quote! {
         impl Packet for #name {
-            fn id() -> PacketId { #packet_id }
+            const ID: PacketId = #packet_id;
         }
 
         impl ClientBound for #name {
 
             fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
-                let packet_id = VarIntField::new(Self::id());
+                let packet_id = VarIntField::new(Self::ID);
                 let len = {
                     let mut len = 0;
                     len += packet_id.size();
@@ -160,7 +160,7 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
                     VarIntField::new(len as i32)
                 };
 
-                trace!("sending packet id {:#x} of {} bytes: {}", Self::id(), len.value(), self);
+                trace!("sending packet id {:#x} of {} bytes: {}", Self::ID, len.value(), self);
 
                 len.write(w)?;
                 packet_id.write(w)?;

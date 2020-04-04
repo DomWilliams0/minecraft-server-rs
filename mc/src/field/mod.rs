@@ -2,11 +2,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::io::{Read, Write};
 
-pub use long::LongField;
-pub use string::StringField;
-pub use ushort::UShortField;
-pub use varint::VarIntField;
-
 use crate::error::McResult;
 
 pub trait Field: Sized {
@@ -26,16 +21,22 @@ impl<'a, T: Display> Display for DisplayableField<'a, T> {
     }
 }
 
+mod array;
 mod long;
 mod string;
 mod ushort;
 mod varint;
 
+pub use array::VarIntThenByteArrayField;
+pub use long::LongField;
+pub use string::StringField;
+pub use ushort::UShortField;
+pub use varint::VarIntField;
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::io::Cursor;
-
-    use crate::field::{Field, StringField, UShortField, VarIntField};
 
     #[test]
     fn sizes() {

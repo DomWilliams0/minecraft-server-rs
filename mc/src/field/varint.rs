@@ -96,7 +96,7 @@ impl VarIntField {
 
 #[cfg(test)]
 mod tests {
-    use crate::field::{Field, VarIntField};
+    use crate::field::*;
     use std::io::Cursor;
 
     fn assert_varint(val: i32, bytes: &[u8]) {
@@ -141,7 +141,7 @@ mod tests {
         let varints: Vec<i32> = (0..3)
             .map(|i| {
                 VarIntField::read(&mut stream)
-                    .expect(&format!("failed varint #{}", i))
+                    .unwrap_or_else(|_| panic!("failed varint #{}", i))
                     .value()
             })
             .collect();
