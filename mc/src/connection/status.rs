@@ -2,10 +2,16 @@ use crate::connection::{ActiveState, State, StatusState};
 use crate::error::{McError, McResult};
 use crate::field::*;
 use crate::packet::*;
+use crate::server::ServerDataRef;
 use std::io::Write;
 
 impl<W: Write> State<W> for StatusState {
-    fn handle_transaction(self, packet: PacketBody, resp_write: &mut W) -> McResult<ActiveState> {
+    fn handle_transaction(
+        self,
+        packet: PacketBody,
+        resp_write: &mut W,
+        _server_data: &ServerDataRef,
+    ) -> McResult<ActiveState> {
         match packet.id {
             PacketEmpty::ID => {
                 let _empty = PacketEmpty::read(packet)?;

@@ -36,7 +36,10 @@ fn main() {
         .filter_level(LevelFilter::Trace)
         .init();
 
-    let server_data = ServerData::new();
+    let server_data = ServerData::new().unwrap_or_else(|e| {
+        error!("failed to init server: {:?}", e);
+        std::process::exit(1)
+    });
 
     let addr = ("127.0.0.1", 25565);
     let listener = TcpListener::bind(addr).unwrap();

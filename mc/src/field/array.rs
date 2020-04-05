@@ -8,6 +8,19 @@ pub struct VarIntThenByteArrayField {
     array: ByteArray,
 }
 
+impl VarIntThenByteArrayField {
+    pub fn new(buf: Vec<u8>) -> Self {
+        Self {
+            length: VarIntField::new(buf.len() as i32),
+            array: ByteArray(buf),
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.array.0
+    }
+}
+
 impl Field for VarIntThenByteArrayField {
     type Displayable = ByteArray;
 
@@ -16,7 +29,7 @@ impl Field for VarIntThenByteArrayField {
     }
 
     fn size(&self) -> usize {
-        self.length.value() as usize
+        self.length.size() + self.length.value() as usize
     }
 
     fn read<R: Read>(r: &mut R) -> McResult<Self> {

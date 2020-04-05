@@ -21,6 +21,10 @@ impl StringField {
             length: VarIntField::new(len as i32),
         }
     }
+
+    pub fn take(self) -> String {
+        self.value
+    }
 }
 
 impl Field for StringField {

@@ -23,4 +23,8 @@ pub enum McError {
     },
     PleaseDisconnect,
     MutexUnlock,
+    OpenSSL(openssl::error::ErrorStack),
+    MissingClientData,
+    BadClientData,
+    VerifyTokenMismatch,
 }
