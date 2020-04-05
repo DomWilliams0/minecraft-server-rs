@@ -29,7 +29,7 @@ mod varint;
 
 pub use array::VarIntThenByteArrayField;
 pub use long::LongField;
-pub use string::StringField;
+pub use string::{ChatField, StringField};
 pub use ushort::UShortField;
 pub use varint::VarIntField;
 

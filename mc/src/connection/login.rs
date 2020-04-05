@@ -1,11 +1,10 @@
-use crate::connection::play::{OfflinePlayState, OnlinePlayState, PlayStateComms};
+use crate::connection::comms::{ActiveComms, Stream};
 use crate::connection::{ActiveState, LoginState, PlayState, State};
 use crate::error::{McError, McResult};
 use crate::field::*;
 use crate::packet::*;
 use crate::server::{OnlineStatus, ServerDataRef};
 use log::*;
-use std::io::Write;
 use std::mem;
 use uuid::adapter::HyphenatedRef;
 use uuid::Uuid;
@@ -16,12 +15,36 @@ fn generate_verify_token() -> McResult<Vec<u8>> {
     Ok(token)
 }
 
-impl<W: Write> State<W> for LoginState {
+const SERVER_ID: &str = "";
+
+impl<S: Stream> State<S> for LoginState {
     fn handle_transaction(
+        self,
+        packet: PacketBody,
+        server_data: &ServerDataRef,
+        comms: &mut ActiveComms<S>,
+    ) -> McResult<ActiveState> {
+        let ret = self.do_handle(packet, server_data, comms);
+
+        if let Err(e) = &ret {
+            let disconnect = Disconnect {
+                reason: ChatField::new(format!("Error: {}", e)),
+            };
+
+            // ignore error
+            let _ = disconnect.write(comms);
+        }
+
+        ret
+    }
+}
+
+impl LoginState {
+    fn do_handle<S: Stream>(
         mut self,
         packet: PacketBody,
-        resp_write: &mut W,
         server_data: &ServerDataRef,
+        comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
         match packet.id {
             LoginStart::ID => {
@@ -34,23 +57,23 @@ impl<W: Write> State<W> for LoginState {
                     OnlineStatus::Offline => {
                         // no auth
                         let player_uuid = Uuid::new_v4();
-                        let (response, play_state) =
-                            self.into_play_state(player_name, player_uuid, None)?;
+                        let (login_success, play_state) =
+                            self.into_play_state(player_name, player_uuid)?;
 
-                        response.write(resp_write)?;
+                        login_success.write(comms)?;
                         Ok(ActiveState::Play(play_state))
                     }
                     OnlineStatus::Online { public_key } => {
                         let verify_token = generate_verify_token()?;
 
                         let enc_req = EncryptionRequest {
-                            server_id: StringField::new("".to_owned()),
+                            server_id: StringField::new(SERVER_ID.to_owned()),
 
                             pub_key: VarIntThenByteArrayField::new(public_key),
                             verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
                         };
 
-                        enc_req.write(resp_write)?;
+                        enc_req.write(comms)?;
 
                         let new_state = LoginState {
                             player_name,
@@ -65,12 +88,13 @@ impl<W: Write> State<W> for LoginState {
                 let enc_resp = EncryptionResponse::read(packet)?;
 
                 {
-                    let (decrypted_token, decrypted_shared_secret) = {
+                    let (decrypted_token, decrypted_shared_secret, public_key) = {
                         let server_data = server_data.lock().map_err(|_| McError::MutexUnlock)?;
                         let token = server_data.decrypt(&enc_resp.verify_token.bytes())?;
                         let secret = server_data.decrypt(&enc_resp.shared_secret.bytes())?;
+                        let public_key = server_data.public_key()?;
 
-                        (token, secret)
+                        (token, secret, public_key)
                     };
 
                     // verify token decrypts to the same value
@@ -84,31 +108,35 @@ impl<W: Write> State<W> for LoginState {
 
                     let player_name = mem::take(&mut self.player_name);
                     debug!("enabling AES packet encryption for player {}", player_name);
+                    comms.upgrade(decrypted_shared_secret.clone())?;
 
-                    // TODO request uuid and authenticate player with mojang
-                    let player_uuid = Uuid::new_v4();
-
-                    let (login_success, play_state) = self.into_play_state(
-                        player_name,
-                        player_uuid,
-                        Some(decrypted_shared_secret),
+                    debug!("authenticating player with mojang");
+                    let auth_response = auth::auth(
+                        &player_name,
+                        SERVER_ID,
+                        &decrypted_shared_secret,
+                        &public_key,
                     )?;
+                    debug!(
+                        "authenticated player with mojang, got uuid of {}",
+                        auth_response.uuid
+                    );
 
-                    login_success.write(resp_write)?;
+                    let (login_success, play_state) =
+                        self.into_play_state(player_name, auth_response.uuid)?;
+
+                    login_success.write(comms)?;
                     Ok(ActiveState::Play(play_state))
                 }
             }
             x => Err(McError::BadPacketId(x)),
         }
     }
-}
 
-impl LoginState {
     fn into_play_state(
         self,
         player_name: String,
         player_uuid: Uuid,
-        shared_secret: Option<Vec<u8>>,
     ) -> McResult<(LoginSuccess, PlayState)> {
         let encoded_uuid = {
             let mut buf = vec![0u8; HyphenatedRef::LENGTH];
@@ -123,18 +151,116 @@ impl LoginState {
             username: StringField::new(player_name.clone()),
         };
 
-        let comms: Box<dyn PlayStateComms> = if let Some(shared_secret) = shared_secret {
-            Box::new(OnlinePlayState { shared_secret })
-        } else {
-            Box::new(OfflinePlayState)
-        };
-
         let state = PlayState {
             player_name,
             uuid: player_uuid,
-            comms,
         };
 
         Ok((response, state))
+    }
+}
+
+mod auth {
+    use crate::error::{McError, McResult};
+    use log::*;
+    use num::BigInt;
+    use openssl::sha::Sha1;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    pub struct AuthResponse {
+        pub uuid: Uuid,
+        // TODO skin
+    }
+
+    fn generate_hash(server_id: &str, shared_secret: &[u8], public_key: &[u8]) -> String {
+        let mut sha1 = Sha1::new();
+        sha1.update(server_id.as_bytes());
+        sha1.update(shared_secret);
+        sha1.update(public_key);
+        finish_hash(sha1)
+    }
+
+    fn finish_hash(sha: Sha1) -> String {
+        let raw_bytes = sha.finish();
+        let big_int = BigInt::from_signed_bytes_be(&raw_bytes);
+
+        big_int.to_str_radix(16)
+    }
+
+    pub fn auth(
+        player_name: &str,
+        server_id: &str,
+        shared_secret: &[u8],
+        public_key: &[u8],
+    ) -> McResult<AuthResponse> {
+        let hash = generate_hash(server_id, shared_secret, public_key);
+
+        let response = ureq::get("https://sessionserver.mojang.com/session/minecraft/hasJoined")
+            .query("username", player_name)
+            .query("serverId", &hash)
+            .timeout_connect(10_000)
+            .timeout_read(10_000)
+            .call();
+
+        if response.ok() {
+            let json = match response.into_json().map_err(McError::Auth)? {
+                ureq::SerdeValue::Object(obj) => obj,
+                _ => return Err(McError::BadAuthResponse),
+            };
+
+            match (json.get("id"), json.get("name")) {
+                (Some(ureq::SerdeValue::String(uuid)), Some(ureq::SerdeValue::String(name))) => {
+                    if name != player_name {
+                        warn!("incorrect player name returned from mojang, expected '{}' but got '{}'", player_name, name);
+                        return Err(McError::BadAuthResponse);
+                    }
+
+                    let uuid = match Uuid::from_str(uuid) {
+                        Ok(uuid) => uuid,
+                        Err(_) => {
+                            warn!("bad uuid returned from mojang ('{}')", uuid);
+                            return Err(McError::BadAuthResponse);
+                        }
+                    };
+
+                    Ok(AuthResponse { uuid })
+                }
+                _ => {
+                    warn!("bad json returned from mojang");
+                    Err(McError::BadAuthResponse)
+                }
+            }
+        } else {
+            Err(McError::UnexpectedAuthResponse(response.status()))
+        }
+    }
+
+    #[cfg(test)]
+    fn generate_hash_from_name(name: &str) -> String {
+        let mut sha1 = Sha1::new();
+        sha1.update(name.as_bytes());
+        finish_hash(sha1)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::generate_hash_from_name;
+
+        #[test]
+        fn hash() {
+            assert_eq!(
+                "-7c9d5b0044c130109a5d7b5fb5c317c02b4e28c1",
+                generate_hash_from_name("jeb_")
+            );
+            assert_eq!(
+                "4ed1f46bbe04bc756bcb17c0c7ce3e4632f06a48",
+                generate_hash_from_name("Notch")
+            );
+            assert_eq!(
+                "88e16a1019277b15d58faf0541e11910eb756f6",
+                generate_hash_from_name("simon")
+            );
+        }
     }
 }

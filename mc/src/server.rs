@@ -21,13 +21,14 @@ pub struct ServerData {
 impl ServerData {
     pub fn new() -> McResult<ServerDataRef> {
         let data = Self {
+            // TODO only generate if online
             rsa_key: Rsa::generate(1024).map_err(McError::OpenSSL)?,
         };
 
         Ok(Arc::new(Mutex::new(data)))
     }
 
-    fn public_key(&self) -> McResult<Vec<u8>> {
+    pub fn public_key(&self) -> McResult<Vec<u8>> {
         self.rsa_key.public_key_to_der().map_err(McError::OpenSSL)
     }
 

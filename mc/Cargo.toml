@@ -11,4 +11,7 @@ mc-packet-derive = {path = "mc-packet-derive"}
 log = "^0.4"
 byteorder = "^1.3"
 openssl = {version = "^0.10", features = ["vendored"]}
+cryptostream = "^0.3"
 uuid = {version = "^0.8", features = ["v4"]}
+num = "^0.2"
+ureq = {version = "^0.12", features = ["json"]}

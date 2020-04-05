@@ -1,38 +1,38 @@
+use crate::connection::comms::{ActiveComms, Stream};
 use crate::connection::{ActiveState, State, StatusState};
 use crate::error::{McError, McResult};
 use crate::field::*;
 use crate::packet::*;
 use crate::server::ServerDataRef;
-use std::io::Write;
 
-impl<W: Write> State<W> for StatusState {
+impl<S: Stream> State<S> for StatusState {
     fn handle_transaction(
         self,
         packet: PacketBody,
-        resp_write: &mut W,
         _server_data: &ServerDataRef,
+        comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
         match packet.id {
-            PacketEmpty::ID => {
-                let _empty = PacketEmpty::read(packet)?;
+            Empty::ID => {
+                let _empty = Empty::read(packet)?;
 
-                let response = PacketStatusResponse {
+                let status = StatusResponse {
                     json_response: StringField::new(generate_json(
                         "mInEcRaFt",
                         include_str!("../../icon.png.base64"),
                     )),
                 };
 
-                response.write(resp_write)?;
+                status.write(comms)?;
                 Ok(ActiveState::Status(self))
             }
-            PacketPing::ID => {
-                let ping = PacketPing::read(packet)?;
-                let response = PacketPong {
+            Ping::ID => {
+                let ping = Ping::read(packet)?;
+                let pong = Pong {
                     payload: ping.payload,
                 };
 
-                response.write(resp_write)?;
+                pong.write(comms)?;
                 Err(McError::PleaseDisconnect)
             }
             x => Err(McError::BadPacketId(x)),

@@ -55,3 +55,38 @@ impl Field for StringField {
         w.write_all(self.value.as_bytes()).map_err(McError::Io)
     }
 }
+
+pub struct ChatField {
+    // TODO colors and stuff
+    string: StringField,
+}
+
+impl ChatField {
+    pub fn new(value: String) -> Self {
+        Self {
+            string: StringField::new(format!(r#"{{"text": "{}"}}"#, value)),
+        }
+    }
+}
+
+impl Field for ChatField {
+    type Displayable = String;
+
+    fn value(&self) -> &Self::Displayable {
+        &self.string.value()
+    }
+
+    fn size(&self) -> usize {
+        self.string.size()
+    }
+
+    fn read<R: Read>(r: &mut R) -> McResult<Self> {
+        Ok(Self {
+            string: StringField::read(r)?,
+        })
+    }
+
+    fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
+        self.string.write(w)
+    }
+}

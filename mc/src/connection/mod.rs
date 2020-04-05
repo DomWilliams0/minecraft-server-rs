@@ -1,31 +1,32 @@
 use log::*;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read};
 
-use crate::connection::play::PlayStateComms;
+use crate::connection::comms::{ActiveComms, Stream};
 use crate::error::{McError, McResult};
 use crate::field::{Field, VarIntField};
 use crate::packet::*;
 use crate::server::ServerDataRef;
 use uuid::Uuid;
 
+mod comms;
 mod handshake;
 mod login;
 mod play;
 mod status;
 
-trait State<W: Write> {
+trait State<S: Stream> {
     fn handle_transaction(
         self,
         packet: PacketBody,
-        resp_write: &mut W,
         server_data: &ServerDataRef,
+        comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState>;
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Default)]
 struct HandshakeState;
 
-#[derive(Copy, Clone, Default)]
+#[derive(Default)]
 struct StatusState;
 
 #[derive(Default)]
@@ -37,7 +38,6 @@ struct LoginState {
 struct PlayState {
     pub player_name: String,
     pub uuid: Uuid,
-    pub comms: Box<dyn PlayStateComms>,
 }
 
 enum ActiveState {
@@ -53,23 +53,23 @@ impl Default for ActiveState {
     }
 }
 
-pub struct ConnectionState<S: Read + Write> {
-    stream: S,
+pub struct ConnectionState<S: Stream> {
+    comms: ActiveComms<S>,
     state: ActiveState,
     server_data: ServerDataRef,
 }
 
-impl<S: Read + Write> ConnectionState<S> {
+impl<S: Stream> ConnectionState<S> {
     pub fn new(server_data: ServerDataRef, stream: S) -> Self {
         Self {
-            stream,
+            comms: ActiveComms::new(stream),
             state: ActiveState::default(),
             server_data,
         }
     }
 }
 
-impl<S: Read + Write> ConnectionState<S> {
+impl<S: Stream> ConnectionState<S> {
     pub fn handle_transaction(&mut self) -> McResult<()> {
         let packet = self.read_packet()?;
 
@@ -77,23 +77,23 @@ impl<S: Read + Write> ConnectionState<S> {
 
         self.state = match state {
             ActiveState::Handshake(state) => {
-                state.handle_transaction(packet, &mut self.stream, &self.server_data)
+                state.handle_transaction(packet, &self.server_data, &mut self.comms)
             }
             ActiveState::Status(state) => {
-                state.handle_transaction(packet, &mut self.stream, &self.server_data)
+                state.handle_transaction(packet, &self.server_data, &mut self.comms)
             }
             ActiveState::Login(state) => {
-                state.handle_transaction(packet, &mut self.stream, &self.server_data)
+                state.handle_transaction(packet, &self.server_data, &mut self.comms)
             }
             ActiveState::Play(state) => {
-                state.handle_transaction(packet, &mut self.stream, &self.server_data)
+                state.handle_transaction(packet, &self.server_data, &mut self.comms)
             }
         }?;
         Ok(())
     }
 
     fn read_packet(&mut self) -> McResult<PacketBody> {
-        let mut length = match VarIntField::read(&mut self.stream) {
+        let mut length = match VarIntField::read(&mut self.comms) {
             Err(McError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
                 debug!("eof");
                 return Err(McError::PleaseDisconnect);
@@ -110,7 +110,7 @@ impl<S: Read + Write> ConnectionState<S> {
         debug!("packet length={}", length);
 
         let packet_id = {
-            let varint = VarIntField::read(&mut self.stream)?;
+            let varint = VarIntField::read(&mut self.comms)?;
             length -= varint.size() as i32; // length includes packet id
             varint.value()
         };
@@ -119,7 +119,7 @@ impl<S: Read + Write> ConnectionState<S> {
 
         let mut recv_buf = vec![0u8; length as usize]; // TODO somehow reuse a buffer in self without making borrowck shit itself
         if length > 0 {
-            self.stream.read_exact(&mut recv_buf).map_err(McError::Io)?;
+            self.comms.read_exact(&mut recv_buf).map_err(McError::Io)?;
         }
 
         Ok(PacketBody {

@@ -16,6 +16,12 @@ pub struct LoginStart {
 }
 
 #[derive(ClientBoundPacket)]
+#[packet_id = 0x00]
+pub struct Disconnect {
+    pub reason: ChatField,
+}
+
+#[derive(ClientBoundPacket)]
 #[packet_id = 0x01]
 pub struct EncryptionRequest {
     pub server_id: StringField,

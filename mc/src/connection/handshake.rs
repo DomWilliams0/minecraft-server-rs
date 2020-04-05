@@ -1,17 +1,16 @@
-use std::io::Write;
-
+use crate::connection::comms::{ActiveComms, Stream};
 use crate::connection::{ActiveState, HandshakeState, LoginState, State, StatusState};
 use crate::error::{McError, McResult};
 use crate::packet::PacketBody;
 use crate::packet::*;
 use crate::server::ServerDataRef;
 
-impl<W: Write> State<W> for HandshakeState {
+impl<S: Stream> State<S> for HandshakeState {
     fn handle_transaction(
         self,
         packet: PacketBody,
-        _resp_write: &mut W,
         _server_data: &ServerDataRef,
+        _comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
         let handshake = Handshake::read(packet)?;
 

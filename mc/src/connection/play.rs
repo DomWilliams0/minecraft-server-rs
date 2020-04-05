@@ -1,27 +1,20 @@
+use crate::connection::comms::{ActiveComms, Stream};
 use crate::connection::{ActiveState, PlayState, State};
 use crate::error::{McError, McResult};
 use crate::packet::PacketBody;
 use crate::server::ServerDataRef;
-use std::io::Write;
 
-pub(crate) trait PlayStateComms {
-    // TODO
-}
+// TODO Keep Alive
+// TODO Join Game
+// TODO Chunk Data (nbt heightmaps, optional fields in packet format, some actual chunk data)
+// TODO central server instance with player list,world etc, and functionality like kick()
 
-pub(crate) struct OfflinePlayState;
-pub(crate) struct OnlinePlayState {
-    pub shared_secret: Vec<u8>,
-}
-
-impl PlayStateComms for OfflinePlayState {}
-impl PlayStateComms for OnlinePlayState {}
-
-impl<W: Write> State<W> for PlayState {
+impl<S: Stream> State<S> for PlayState {
     fn handle_transaction(
         self,
         packet: PacketBody,
-        resp_write: &mut W,
-        server_data: &ServerDataRef,
+        _server_data: &ServerDataRef,
+        _comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
         match packet.id {
             x => Err(McError::BadPacketId(x)),

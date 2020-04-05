@@ -12,11 +12,11 @@ use std::fmt::{Display, Formatter};
 
 #[derive(ServerBoundPacket)]
 #[packet_id = 0x00]
-pub struct PacketEmpty;
+pub struct Empty;
 
 #[derive(ServerBoundPacket)]
 #[packet_id = 0x01]
-pub struct PacketPing {
+pub struct Ping {
     pub payload: LongField,
 }
 
@@ -24,12 +24,12 @@ pub struct PacketPing {
 
 #[derive(ClientBoundPacket)]
 #[packet_id = 0x00]
-pub struct PacketStatusResponse {
+pub struct StatusResponse {
     pub json_response: StringField,
 }
 
 #[derive(ClientBoundPacket)]
 #[packet_id = 0x01]
-pub struct PacketPong {
+pub struct Pong {
     pub payload: LongField,
 }

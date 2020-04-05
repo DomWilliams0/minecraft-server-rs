@@ -21,7 +21,7 @@ fn handle_connection(server_data: ServerDataRef, stream: TcpStream) {
                 break;
             }
             Err(e) => {
-                warn!("error handling client: {:?}", e);
+                warn!("error handling client: {}", e);
                 break;
             }
             Ok(_) => {}
@@ -33,11 +33,12 @@ fn handle_connection(server_data: ServerDataRef, stream: TcpStream) {
 
 fn main() {
     env_logger::builder()
+        .filter_module("rusttls", LevelFilter::Info)
         .filter_level(LevelFilter::Trace)
         .init();
 
     let server_data = ServerData::new().unwrap_or_else(|e| {
-        error!("failed to init server: {:?}", e);
+        error!("failed to init server: {}", e);
         std::process::exit(1)
     });
 
