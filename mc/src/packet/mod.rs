@@ -23,7 +23,9 @@ pub trait ServerBound: Sized + Packet {
 mod handshake;
 mod login;
 mod status;
+mod play;
 
 pub use handshake::*;
 pub use login::*;
 pub use status::*;
+pub use play::*;

@@ -22,15 +22,13 @@ impl<'a, T: Display> Display for DisplayableField<'a, T> {
 }
 
 mod array;
-mod long;
 mod string;
-mod ushort;
+mod primitive;
 mod varint;
 
 pub use array::VarIntThenByteArrayField;
-pub use long::LongField;
 pub use string::{ChatField, StringField};
-pub use ushort::UShortField;
+pub use primitive::{ShortField, UShortField, IntField, LongField, FloatField, DoubleField, BoolField, UByteField};
 pub use varint::VarIntField;
 
 #[cfg(test)]
