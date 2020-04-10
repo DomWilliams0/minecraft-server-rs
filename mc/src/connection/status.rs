@@ -1,17 +1,16 @@
-use crate::connection::{ActiveState, State, StatusState};
-use crate::connection::comms::ActiveComms;
+use crate::connection::{ActiveState, ResponseSink, State, StatusState};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerDataRef;
 
 #[async_trait]
-impl<S: McStream> State<S> for StatusState {
+impl<R: ResponseSink> State<R> for StatusState {
     async fn handle_transaction(
         self,
         packet: PacketBody,
         _server_data: &ServerDataRef,
-        comms: &mut ActiveComms<S>,
+        response_sink: &mut R,
     ) -> McResult<ActiveState> {
         match packet.id {
             Empty::ID => {
@@ -24,7 +23,8 @@ impl<S: McStream> State<S> for StatusState {
                     )),
                 };
 
-                status.write_packet(comms).await?;
+                response_sink.send_packet(status).await?;
+
                 Ok(ActiveState::Status(self))
             }
             Ping::ID => {
@@ -32,8 +32,8 @@ impl<S: McStream> State<S> for StatusState {
                 let pong = Pong {
                     payload: ping.payload,
                 };
+                response_sink.send_packet(pong).await?;
 
-                pong.write_packet(comms).await?;
                 Err(McError::PleaseDisconnect)
             }
             x => Err(McError::BadPacketId(x)),

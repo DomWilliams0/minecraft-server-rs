@@ -1,18 +1,15 @@
-use crate::connection::{ActiveState, HandshakeState, State, StatusState};
-use crate::connection::comms::ActiveComms;
+use crate::connection::{ActiveState, HandshakeState, ResponseSink, State, StatusState};
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerDataRef;
 
-// TODO prelude
-
 #[async_trait]
-impl<S: McStream> State<S> for HandshakeState {
+impl<R: ResponseSink> State<R> for HandshakeState {
     async fn handle_transaction(
         self,
         packet: PacketBody,
         _server_data: &ServerDataRef,
-        _comms: &mut ActiveComms<S>,
+        _response_sink: &mut R,
     ) -> McResult<ActiveState> {
         let handshake = Handshake::read_packet(packet).await?;
 

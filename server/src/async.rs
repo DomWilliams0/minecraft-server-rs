@@ -1,19 +1,22 @@
-use async_std::prelude::*;
-use log::*;
-
-use async_std::io;
+use async_std::io::{self, prelude::*};
 use async_std::net::{TcpListener, TcpStream};
+use async_std::prelude::*;
 use async_std::task;
 use futures::channel::mpsc;
+use futures::channel::mpsc::unbounded;
+use log::*;
+
 use mc::connection::ConnectionState;
 use mc::error::{McError, McResult};
+use mc::packet::ClientBoundPacket;
 use mc::server::{ServerData, ServerDataRef};
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
 
 async fn handle_client(
-    broker_tx: Sender<BrokerMessage>,
+    clientbound_tx: Sender<ClientBoundPacket>,
+    mut clientbound_rx: Receiver<ClientBoundPacket>,
     stream: io::Result<TcpStream>,
     server_data: ServerDataRef,
 ) -> McResult<()> {
@@ -26,10 +29,27 @@ async fn handle_client(
     //     .await
     //     .map_err(McError::IoChannel)?;
 
-    let mut state = ConnectionState::new(server_data, stream);
+    let (reader, mut writer) = (stream.clone(), stream);
+
+    // spawn writer loop
+    let _write_loop = task::spawn(async move {
+        while let Some(packet) = clientbound_rx.next().await {
+            writer.write_all(&packet).await.expect("send failed"); // TODO error propagation?
+        }
+    });
+
+    // reader loop - all socket io must happen in the ConnectionState
+    let mut connection = ConnectionState::new(server_data, reader, clientbound_tx);
 
     loop {
-        state.handle_transaction().await?;
+        let packet = match connection.read_packet().await {
+            Ok(p) => p,
+            Err(e) => break Err(e),
+        };
+
+        if let Err(e) = connection.handle_packet(packet).await {
+            break Err(e);
+        };
     }
 }
 
@@ -44,10 +64,14 @@ async fn accept_clients(host: &str, port: u16, server_data: ServerDataRef) -> Mc
     // start client loop
     let mut incoming = listener.incoming();
     while let Some(stream) = incoming.next().await {
-        let broker_tx = broker_tx.clone();
+        // let broker_tx = broker_tx.clone();
         let server_data = server_data.clone();
+        let (clientbound_tx, clientbound_rx) = unbounded();
+
+        // TODO keep clientbound_tx for server
+
         let _ = task::spawn(async move {
-            match handle_client(broker_tx, stream, server_data).await {
+            match handle_client(clientbound_tx, clientbound_rx, stream, server_data).await {
                 Err(McError::PleaseDisconnect) => debug!("politely closing connection"), // not an error
                 Err(e) => error!("error handling client: {}", e),
                 _ => {}
@@ -60,7 +84,7 @@ async fn accept_clients(host: &str, port: u16, server_data: ServerDataRef) -> Mc
 
 enum BrokerMessage {}
 
-async fn run_broker(mut broker_rx: Receiver<BrokerMessage>) {
+async fn run_broker(broker_rx: Receiver<BrokerMessage>) {
     // TODO broker will only access outgoing client queue, NOT the socket
     // let mut clients: Slab<Arc<TcpStream>> = Slab::with_capacity(16);
     /*

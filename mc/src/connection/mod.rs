@@ -2,6 +2,7 @@ use std::ops::DerefMut;
 
 use async_std::io::ErrorKind;
 use async_std::sync::Mutex;
+use futures::{Sink, SinkExt};
 use uuid::Uuid;
 
 use crate::connection::comms::ActiveComms;
@@ -25,12 +26,22 @@ impl<T: Write + Unpin + Send> McWrite for T {}
 impl<T: McRead + McWrite> McStream for T {}
 
 #[async_trait]
-trait State<S: McStream> {
+pub trait ResponseSink: Sink<ClientBoundPacket> + Unpin + Send {
+    async fn send_packet<P: ClientBound + Sync + Send>(&mut self, packet: P) -> McResult<()> {
+        let c = ClientBoundPacket::from(packet);
+        self.send(c).await.map_err(|_| McError::ResponseSink)
+    }
+}
+
+impl<S: Sink<ClientBoundPacket> + Unpin + Send> ResponseSink for S {}
+
+#[async_trait]
+trait State<R: ResponseSink> {
     async fn handle_transaction(
         self,
         packet: PacketBody,
         server_data: &ServerDataRef,
-        comms: &mut ActiveComms<S>,
+        response_sink: &mut R,
     ) -> McResult<ActiveState>;
 }
 
@@ -64,50 +75,24 @@ impl Default for ActiveState {
     }
 }
 
-pub struct ConnectionState<S: McStream> {
+pub struct ConnectionState<S: McStream, R: ResponseSink> {
     comms: Mutex<ActiveComms<S>>,
     state: ActiveState,
     server_data: ServerDataRef,
+    response_sink: R,
 }
 
-impl<S: McStream> ConnectionState<S> {
-    pub fn new(server_data: ServerDataRef, stream: S) -> Self {
+impl<S: McStream, R: ResponseSink> ConnectionState<S, R> {
+    pub fn new(server_data: ServerDataRef, stream: S, response_sink: R) -> Self {
         Self {
             comms: Mutex::new(ActiveComms::new(stream)),
             state: ActiveState::default(),
             server_data,
+            response_sink,
         }
     }
-}
 
-impl<S: McStream> ConnectionState<S> {
-    pub async fn handle_transaction(&mut self) -> McResult<()> {
-        let packet = self.read_packet().await?;
-
-        let state = std::mem::take(&mut self.state);
-
-        let mut comms = self.comms.lock().await;
-        self.state = match state {
-            ActiveState::Handshake(state) => {
-                state
-                    .handle_transaction(packet, &self.server_data, &mut comms)
-                    .await
-            }
-            ActiveState::Status(state) => {
-                state
-                    .handle_transaction(packet, &self.server_data, &mut comms)
-                    .await
-            }
-            // ActiveState::Login(state) => {
-            //     state
-            //         .handle_transaction(packet, &self.server_data, &mut comms)
-            //         .await
-            // },
-        }?;
-        Ok(())
-    }
-
-    async fn read_packet(&mut self) -> McResult<PacketBody> {
+    pub async fn read_packet(&self) -> McResult<PacketBody> {
         let mut comms = self.comms.lock().await;
         let comms = comms.deref_mut();
         let mut length = match VarIntField::read_field(comms).await {
@@ -143,5 +128,28 @@ impl<S: McStream> ConnectionState<S> {
             id: packet_id,
             body: recv_buf,
         })
+    }
+
+    pub async fn handle_packet(&mut self, packet: PacketBody) -> McResult<()> {
+        let state = std::mem::take(&mut self.state); // TODO is this safe?
+
+        self.state = match state {
+            ActiveState::Handshake(state) => {
+                state
+                    .handle_transaction(packet, &self.server_data, &mut self.response_sink)
+                    .await
+            }
+            ActiveState::Status(state) => {
+                state
+                    .handle_transaction(packet, &self.server_data, &mut self.response_sink)
+                    .await
+            }
+            // ActiveState::Login(state) => {
+            //     state
+            //         .handle_transaction(packet, &self.server_data, &mut comms)
+            //         .await
+            // },
+        }?;
+        Ok(())
     }
 }
