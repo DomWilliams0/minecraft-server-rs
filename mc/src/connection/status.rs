@@ -1,16 +1,12 @@
-use async_std::io::prelude::*;
-use async_trait::async_trait;
-
+use crate::connection::{ActiveState, State, StatusState};
 use crate::connection::comms::ActiveComms;
-use crate::connection::{ActiveState, HandshakeState, LoginState, State, StatusState};
-use crate::error::{McError, McResult};
-use crate::field::StringField;
-use crate::packet::PacketBody;
+use crate::field::*;
 use crate::packet::*;
+use crate::prelude::*;
 use crate::server::ServerDataRef;
 
 #[async_trait]
-impl<S: Read + Write + Unpin + Send> State<S> for StatusState {
+impl<S: McStream> State<S> for StatusState {
     async fn handle_transaction(
         self,
         packet: PacketBody,
@@ -18,7 +14,6 @@ impl<S: Read + Write + Unpin + Send> State<S> for StatusState {
         comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
         match packet.id {
-            /*
             Empty::ID => {
                 let _empty = Empty::read_packet(packet).await?;
 
@@ -41,7 +36,6 @@ impl<S: Read + Write + Unpin + Send> State<S> for StatusState {
                 pong.write_packet(comms).await?;
                 Err(McError::PleaseDisconnect)
             }
-            */
             x => Err(McError::BadPacketId(x)),
         }
     }

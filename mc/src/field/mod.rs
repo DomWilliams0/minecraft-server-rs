@@ -1,18 +1,15 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use async_std::io::{Read, Write};
-
 pub use array::VarIntThenByteArrayField;
-use async_trait::async_trait;
-// pub use primitive::{
-//     DoubleField, FloatField, IntField, LongField, ShortField, UShortField,
-// };
-pub use primitive::UShortField;
+pub use primitive::{
+    BoolField, ByteField, DoubleField, FloatField, IntField, LongField, ShortField, UByteField,
+    UShortField,
+};
 pub use string::{ChatField, StringField};
 pub use varint::VarIntField;
 
-use crate::error::McResult;
+use crate::prelude::*;
 
 #[async_trait]
 pub trait Field: Sized {
@@ -20,8 +17,8 @@ pub trait Field: Sized {
     fn value(&self) -> &Self::Displayable;
 
     fn size(&self) -> usize;
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self>;
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()>;
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self>;
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()>;
 }
 
 pub struct DisplayableField<'a, T: Display>(pub &'a T);
@@ -40,7 +37,8 @@ mod varint;
 #[cfg(test)]
 mod tests {
     use async_std::io::Cursor;
-    use crate::field::{StringField, UShortField, VarIntField, Field};
+
+    use crate::field::{Field, StringField, UShortField, VarIntField};
 
     #[test]
     fn sizes() {

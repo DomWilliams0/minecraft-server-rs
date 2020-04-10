@@ -22,7 +22,7 @@ fn generate_verify_token() -> McResult<Vec<u8>> {
 const SERVER_ID: &str = "";
 
 #[async_trait]
-impl<S: Read + Write + Unpin + Send> State<S> for LoginState {
+impl<S: McStream> State<S> for LoginState {
     async fn handle_transaction(
         self,
         packet: PacketBody,
@@ -46,7 +46,7 @@ impl<S: Read + Write + Unpin + Send> State<S> for LoginState {
 }
 
 impl LoginState {
-    async fn do_handle<S: Read + Write + Unpin + Send>(
+    async fn do_handle<S: McStream>(
         mut self,
         packet: PacketBody,
         server_data: &ServerDataRef,

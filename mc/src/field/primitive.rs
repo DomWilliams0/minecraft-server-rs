@@ -4,6 +4,7 @@ use async_std::io::prelude::*;
 
 use async_trait::async_trait;
 
+use crate::connection::{McRead, McWrite};
 use crate::error::{McError, McResult};
 use crate::field::Field;
 
@@ -31,7 +32,7 @@ macro_rules! gen_primitive {
                 mem::size_of::<$int>()
             }
 
-            async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<$name> {
+            async fn read_field<R: McRead>(r: &mut R) -> McResult<$name> {
                 let mut buf = [0u8; mem::size_of::<$int>()];
                 r.read_exact(&mut buf).await.map_err(McError::Io)?;
 
@@ -39,7 +40,7 @@ macro_rules! gen_primitive {
                 Ok(Self(val))
             }
 
-            async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+            async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
                 let buf = $int::to_be_bytes(self.0);
                 w.write_all(&buf).await.map_err(McError::Io)
             }
@@ -107,7 +108,7 @@ impl Field for BoolField {
         1
     }
 
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
         let mut buf = [0u8; 1];
         r.read_exact(&mut buf).await.map_err(McError::Io)?;
 
@@ -118,7 +119,7 @@ impl Field for BoolField {
         }
     }
 
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         let buf = [self.0 as u8];
         w.write_all(&buf).await.map_err(McError::Io)
     }
@@ -126,10 +127,12 @@ impl Field for BoolField {
 
 #[cfg(test)]
 mod bool {
-    use super::*;
     use async_std::io::{Cursor, SeekFrom};
-    use quickcheck::{Arbitrary, Gen};
     use quickcheck_macros::quickcheck;
+
+    use quickcheck::{Arbitrary, Gen};
+
+    use super::*;
 
     impl Arbitrary for BoolField {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {

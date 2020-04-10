@@ -1,17 +1,13 @@
 use std::ops::DerefMut;
 
-use async_std::io::prelude::*;
-use async_std::io::{ErrorKind, ReadExt};
+use async_std::io::ErrorKind;
 use async_std::sync::Mutex;
-use log::*;
 use uuid::Uuid;
 
-use async_trait::async_trait;
-
 use crate::connection::comms::ActiveComms;
-use crate::error::{McError, McResult};
-use crate::field::{Field, VarIntField};
+use crate::field::*;
 use crate::packet::*;
+use crate::prelude::*;
 use crate::server::ServerDataRef;
 
 mod comms;
@@ -20,8 +16,16 @@ mod status;
 // mod login;
 // mod play;
 
+pub trait McRead: Read + Unpin + Send {}
+pub trait McWrite: Write + Unpin + Send {}
+pub trait McStream: McRead + McWrite {}
+
+impl<T: Read + Unpin + Send> McRead for T {}
+impl<T: Write + Unpin + Send> McWrite for T {}
+impl<T: McRead + McWrite> McStream for T {}
+
 #[async_trait]
-trait State<S: Read + Write + Unpin + Send> {
+trait State<S: McStream> {
     async fn handle_transaction(
         self,
         packet: PacketBody,
@@ -60,13 +64,13 @@ impl Default for ActiveState {
     }
 }
 
-pub struct ConnectionState<S: Read + Write + Unpin + Send> {
+pub struct ConnectionState<S: McStream> {
     comms: Mutex<ActiveComms<S>>,
     state: ActiveState,
     server_data: ServerDataRef,
 }
 
-impl<S: Read + Write + Unpin + Send> ConnectionState<S> {
+impl<S: McStream> ConnectionState<S> {
     pub fn new(server_data: ServerDataRef, stream: S) -> Self {
         Self {
             comms: Mutex::new(ActiveComms::new(stream)),
@@ -76,7 +80,7 @@ impl<S: Read + Write + Unpin + Send> ConnectionState<S> {
     }
 }
 
-impl<S: Read + Write + Unpin + Send> ConnectionState<S> {
+impl<S: McStream> ConnectionState<S> {
     pub async fn handle_transaction(&mut self) -> McResult<()> {
         let packet = self.read_packet().await?;
 

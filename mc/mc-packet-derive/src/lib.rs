@@ -151,7 +151,7 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
         #[async_trait]
         impl ClientBound for #name {
 
-            async fn write_packet<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+            async fn write_packet<W: McWrite>(&self, w: &mut W) -> McResult<()> {
                 let packet_id = VarIntField::new(Self::ID);
                 let len = {
                     let mut len = 0;

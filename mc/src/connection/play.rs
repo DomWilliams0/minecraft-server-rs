@@ -9,7 +9,7 @@ use crate::server::ServerDataRef;
 // TODO Chunk Data (nbt heightmaps, optional fields in packet format, some actual chunk data)
 // TODO central server instance with player list,world etc, and functionality like kick()
 
-impl<S: Read + Write + Unpin> State<S> for PlayState {
+impl<S: McStream> State<S> for PlayState {
     fn handle_transaction(
         self,
         packet: PacketBody,

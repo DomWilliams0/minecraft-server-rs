@@ -1,13 +1,11 @@
 use std::pin::Pin;
 
-use async_std::io::prelude::*;
-use async_std::io::Result as IoResult;
 use async_std::task::{Context, Poll};
 
-use crate::error::McResult;
+use crate::prelude::*;
 
 // TODO delegate?
-pub(crate) enum ActiveComms<S: Read + Write + Unpin> {
+pub(crate) enum ActiveComms<S: McStream> {
     Plaintext { stream: S },
     // Encrypted {
     //     reader: Decryptor<S>,
@@ -15,13 +13,13 @@ pub(crate) enum ActiveComms<S: Read + Write + Unpin> {
     // },
 }
 
-impl<S: Read + Write + Unpin> ActiveComms<S> {
+impl<S: McStream> ActiveComms<S> {
     pub fn new(stream: S) -> Self {
         ActiveComms::Plaintext { stream }
     }
 }
 
-impl<S: Read + Write + Unpin> Read for ActiveComms<S> {
+impl<S: McStream> Read for ActiveComms<S> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -34,7 +32,7 @@ impl<S: Read + Write + Unpin> Read for ActiveComms<S> {
     }
 }
 
-impl<S: Read + Write + Unpin> Write for ActiveComms<S> {
+impl<S: McStream> Write for ActiveComms<S> {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
         match self.get_mut() {
             ActiveComms::Plaintext { stream } => Pin::new(stream).poll_write(cx, buf),
@@ -57,7 +55,7 @@ impl<S: Read + Write + Unpin> Write for ActiveComms<S> {
     }
 }
 //
-// impl<S: Read + Write + Unpin> Write for ActiveComms<S> {
+// impl<S: McStream> Write for ActiveComms<S> {
 //     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
 //         match self {
 //             ActiveComms::Plaintext { stream } => stream.write(buf),
@@ -73,7 +71,7 @@ impl<S: Read + Write + Unpin> Write for ActiveComms<S> {
 //     }
 // }
 
-impl<S: Read + Write + Unpin> ActiveComms<S> {
+impl<S: McStream> ActiveComms<S> {
     pub fn upgrade(&mut self, shared_secret: Vec<u8>) -> McResult<()> {
         // if let ActiveComms::Plaintext { stream } = self {
         //     let r = stream.try_clone()?;

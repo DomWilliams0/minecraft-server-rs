@@ -1,11 +1,10 @@
 use std::convert::TryFrom;
 
-use async_std::io::prelude::WriteExt;
-use async_std::io::{Read, Write};
-use futures::AsyncReadExt;
+use async_std::io::prelude::*;
 
 use async_trait::async_trait;
 
+use crate::connection::{McRead, McWrite};
 use crate::error::{McError, McResult};
 use crate::field::{Field, VarIntField};
 
@@ -45,7 +44,7 @@ impl Field for StringField {
         self.length.size() + self.length.value() as usize
     }
 
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
         let length = VarIntField::read_field(r).await?.value() as usize;
         let value = {
             let mut vec = vec![0u8; length];
@@ -56,7 +55,7 @@ impl Field for StringField {
         Ok(Self::new(value))
     }
 
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         self.length.write_field(w).await?;
 
         w.write_all(self.value.as_bytes())
@@ -90,13 +89,13 @@ impl Field for ChatField {
         self.string.size()
     }
 
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
         Ok(Self {
             string: StringField::read_field(r).await?,
         })
     }
 
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         self.string.write_field(w).await
     }
 }

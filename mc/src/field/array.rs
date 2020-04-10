@@ -1,11 +1,7 @@
 use std::fmt::{Display, Formatter};
 
-use async_std::io::prelude::*;
-
-use async_trait::async_trait;
-
-use crate::error::{McError, McResult};
-use crate::field::*;
+use crate::field::{Field, VarIntField};
+use crate::prelude::*;
 
 pub struct VarIntThenByteArrayField {
     length: VarIntField,
@@ -37,7 +33,7 @@ impl Field for VarIntThenByteArrayField {
         self.length.size() + self.length.value() as usize
     }
 
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
         let length = VarIntField::read_field(r).await?;
         let mut array = vec![0u8; length.value() as usize];
         r.read_exact(&mut array).await.map_err(McError::Io)?;
@@ -48,7 +44,7 @@ impl Field for VarIntThenByteArrayField {
         })
     }
 
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         self.length.write_field(w).await?;
         w.write_all(&self.array.0).await.map_err(McError::Io)?;
         Ok(())

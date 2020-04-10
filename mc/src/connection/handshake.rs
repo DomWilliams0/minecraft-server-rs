@@ -1,18 +1,13 @@
-use async_std::io::prelude::*;
-
-use async_trait::async_trait;
-
+use crate::connection::{ActiveState, HandshakeState, State, StatusState};
 use crate::connection::comms::ActiveComms;
-use crate::connection::{ActiveState, HandshakeState, LoginState, State, StatusState};
-use crate::error::{McError, McResult};
-use crate::packet::PacketBody;
 use crate::packet::*;
+use crate::prelude::*;
 use crate::server::ServerDataRef;
 
 // TODO prelude
 
 #[async_trait]
-impl<S: Read + Write + Unpin + Send> State<S> for HandshakeState {
+impl<S: McStream> State<S> for HandshakeState {
     async fn handle_transaction(
         self,
         packet: PacketBody,

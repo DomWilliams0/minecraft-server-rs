@@ -1,13 +1,7 @@
 use std::ops::BitAnd;
 
-use async_std::io::prelude::WriteExt;
-use async_std::io::{Read, Write};
-use futures::AsyncReadExt;
-
-use async_trait::async_trait;
-
-use crate::error::{McError, McResult};
 use crate::field::Field;
+use crate::prelude::*;
 
 #[derive(Debug, Copy, Clone)]
 pub struct VarIntField {
@@ -28,7 +22,7 @@ impl Field for VarIntField {
         self.byte_count as usize
     }
 
-    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
         let mut out = 0u32;
         let mut n = 0;
         let mut bytes = [0u8; 5];
@@ -60,7 +54,7 @@ impl Field for VarIntField {
             })
         }
     }
-    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         w.write_all(self.bytes()).await.map_err(McError::Io)
     }
 }
