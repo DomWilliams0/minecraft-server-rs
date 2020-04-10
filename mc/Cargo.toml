@@ -23,3 +23,5 @@ async-trait = "^0.1"
 
 [dev-dependencies]
 futures-await-test = "^0.3"
+quickcheck = "^0.9"
+quickcheck_macros = "^0.9"

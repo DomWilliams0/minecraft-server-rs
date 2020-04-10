@@ -162,7 +162,7 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
                     VarIntField::new(len as i32)
                 };
 
-                trace!("sending packet id {:#x} of {} bytes: {}", Self::ID, len.value(), self);
+                trace!("sending packet id {:#x} of {} bytes: {}", #name::ID, len.value(), self);
 
                 len.write_field(w).await?;
                 packet_id.write_field(w).await?;

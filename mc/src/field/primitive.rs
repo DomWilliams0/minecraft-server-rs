@@ -7,112 +7,157 @@ use async_trait::async_trait;
 use crate::error::{McError, McResult};
 use crate::field::Field;
 
-// macro_rules! gen_primitive {
-//     ($name:ident, $int:ty) => {
-//         #[derive(Debug)]
-//         pub struct $name($int);
-//
-//         impl $name {
-//             pub fn new(value: $int) -> Self {
-//                 Self(value)
-//             }
-//         }
-//
-//         #[async_trait]
-//         impl Field for $name {
-//             type Displayable = $int;
-//
-//             fn value(&self) -> &Self::Displayable {
-//                 &self.0
-//             }
-//
-//             fn size(&self) -> usize {
-//                 mem::size_of::<$int>()
-//             }
-//
-//             async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
-//                 todo!()
-//                 // r.[<read_ $int>]::<BigEndian>() .map_err(McError::Io).map(Self)
-//             }
-//
-//             async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
-//                 todo!()
-//                 // w.[<write_ $int>]::<BigEndian>(self.0).map_err(McError::Io)
-//             }
-//         }
-//     };
-// }
-//
-// gen_primitive!(ShortField, i16);
-// gen_primitive!(UShortField, u16);
-// gen_primitive!(IntField, i32);
-// gen_primitive!(LongField, i64);
-// gen_primitive!(FloatField, f32);
-// gen_primitive!(DoubleField, f64);
+macro_rules! gen_primitive {
+    // tt because of https://github.com/dtolnay/async-trait/issues/46
+    ($name:tt, $int:tt, $tests:ident) => {
+        #[derive(Debug, Clone)]
+        pub struct $name($int);
 
-// no endianness for single bytes, and i can't work out how to make this work with the macro
-// gen_primitive!(BoolType, bool, i8);
-// gen_primitive!(ByteField, i8);
-// gen_primitive!(UByteField, u8);
+        impl $name {
+            pub fn new(value: $int) -> Self {
+                Self(value)
+            }
+        }
 
-#[derive(Debug)]
-pub struct UShortField(u16);
+        #[async_trait]
+        impl Field for $name {
+            type Displayable = $int;
 
-impl UShortField {
-    pub fn new(value: u16) -> Self {
+            fn value(&self) -> &Self::Displayable {
+                &self.0
+            }
+
+            fn size(&self) -> usize {
+                mem::size_of::<$int>()
+            }
+
+            async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<$name> {
+                let mut buf = [0u8; mem::size_of::<$int>()];
+                r.read_exact(&mut buf).await.map_err(McError::Io)?;
+
+                let val = $int::from_be_bytes(buf);
+                Ok(Self(val))
+            }
+
+            async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+                let buf = $int::to_be_bytes(self.0);
+                w.write_all(&buf).await.map_err(McError::Io)
+            }
+        }
+
+        #[cfg(test)]
+        mod $tests {
+            use super::*;
+            use async_std::io::{Cursor, SeekFrom};
+            use quickcheck::{Arbitrary, Gen};
+            use quickcheck_macros::quickcheck;
+
+            impl Arbitrary for $name {
+                fn arbitrary<G: Gen>(g: &mut G) -> Self {
+                    $name::new($int::arbitrary(g))
+                }
+            }
+
+            #[quickcheck]
+            fn values(field: $name) {
+                async_std::task::block_on(async {
+                    let mut cursor = Cursor::new(vec![0u8; mem::size_of::<$int>()]);
+                    field.write_field(&mut cursor).await.unwrap();
+
+                    assert_eq!(cursor.position(), field.size() as u64);
+                    cursor.seek(SeekFrom::Start(0)).await.unwrap();
+
+                    let read = $name::read_field(&mut cursor).await.unwrap();
+                    assert_eq!(cursor.position(), field.size() as u64);
+                    assert_eq!(read.value(), field.value());
+                });
+            }
+        }
+    };
+}
+
+gen_primitive!(ShortField, i16, short);
+gen_primitive!(UShortField, u16, ushort);
+gen_primitive!(IntField, i32, int);
+gen_primitive!(LongField, i64, long);
+gen_primitive!(FloatField, f32, float);
+gen_primitive!(DoubleField, f64, double);
+gen_primitive!(ByteField, i8, byte);
+gen_primitive!(UByteField, u8, ubyte);
+
+// bool is a special one, only 1 byte
+#[derive(Debug, Clone)]
+pub struct BoolField(bool);
+
+impl BoolField {
+    pub fn new(value: bool) -> Self {
         Self(value)
     }
 }
 
 #[async_trait]
-impl Field for UShortField {
-    type Displayable = u16;
+impl Field for BoolField {
+    type Displayable = bool;
 
     fn value(&self) -> &Self::Displayable {
         &self.0
     }
 
     fn size(&self) -> usize {
-        mem::size_of::<u16>()
+        1
     }
 
     async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
-        let mut buf = [0u8; 2];
+        let mut buf = [0u8; 1];
         r.read_exact(&mut buf).await.map_err(McError::Io)?;
-        Ok(unsafe { std::mem::transmute(buf) })
+
+        match buf[0] {
+            0 => Ok(Self(false)),
+            1 => Ok(Self(true)),
+            _ => Err(McError::BadBool),
+        }
     }
 
     async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
-        let buf: [u8; 2] = unsafe { std::mem::transmute(self.0) };
+        let buf = [self.0 as u8];
         w.write_all(&buf).await.map_err(McError::Io)
     }
 }
 
-// #[derive(Debug)]
-// pub struct BoolField(bool);
-//
-// impl BoolField {
-//     pub fn new(value: bool) -> Self {
-//         Self(value)
-//     }
-// }
-//
-// impl Field for BoolField {
-//     type Displayable = bool;
-//
-//     fn value(&self) -> &Self::Displayable {
-//         &self.0
-//     }
-//
-//     fn size(&self) -> usize {
-//         mem::size_of::<bool>()
-//     }
-//
-//     fn read<R: Read>(r: &mut R) -> McResult<Self> {
-//         r.read_u8().map_err(McError::Io).map(|b| Self(b == 1))
-//     }
-//
-//     fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
-//         w.write_u8(self.0 as u8).map_err(McError::Io)
-//     }
-// }
+#[cfg(test)]
+mod bool {
+    use super::*;
+    use async_std::io::{Cursor, SeekFrom};
+    use quickcheck::{Arbitrary, Gen};
+    use quickcheck_macros::quickcheck;
+
+    impl Arbitrary for BoolField {
+        fn arbitrary<G: Gen>(g: &mut G) -> Self {
+            BoolField::new(bool::arbitrary(g))
+        }
+    }
+
+    #[quickcheck]
+    fn values(field: BoolField) {
+        async_std::task::block_on(async {
+            let mut cursor = Cursor::new(vec![0u8; mem::size_of::<bool>()]);
+            field.write_field(&mut cursor).await.unwrap();
+
+            assert_eq!(cursor.position(), field.size() as u64);
+            cursor.seek(SeekFrom::Start(0)).await.unwrap();
+
+            let read = BoolField::read_field(&mut cursor).await.unwrap();
+            assert_eq!(cursor.position(), field.size() as u64);
+            assert_eq!(read.value(), field.value());
+        });
+    }
+
+    #[test]
+    fn invalid_bool_values() {
+        async_std::task::block_on(async {
+            let mut cursor = Cursor::new(vec![5u8]);
+            let read = BoolField::read_field(&mut cursor).await;
+            assert!(read.is_err())
+        });
+    }
+}

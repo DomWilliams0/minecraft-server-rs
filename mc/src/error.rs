@@ -9,6 +9,7 @@ pub type McResult<T> = Result<T, McError>;
 pub enum McError {
     Io(io::Error),
     IoChannel(futures::channel::mpsc::SendError),
+    BadBool,
     StreamFlush(String),
     BadVarInt,
     BadPacketLength(usize),

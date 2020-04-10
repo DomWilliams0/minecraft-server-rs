@@ -22,7 +22,7 @@ impl<S: Read + Write + Unpin + Send> State<S> for HandshakeState {
         let handshake = Handshake::read_packet(packet).await?;
 
         match handshake.next_state.value() {
-            // 1 => Ok(ActiveState::Status(StatusState::default())),
+            1 => Ok(ActiveState::Status(StatusState::default())),
             // 2 => Ok(ActiveState::Login(LoginState::default())),
             x => Err(McError::BadNextState(x)),
         }

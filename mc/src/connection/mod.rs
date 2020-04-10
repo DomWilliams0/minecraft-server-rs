@@ -16,8 +16,8 @@ use crate::server::ServerDataRef;
 
 mod comms;
 mod handshake;
+mod status;
 // mod login;
-// mod status;
 // mod play;
 
 #[async_trait]
@@ -49,7 +49,7 @@ struct PlayState {
 
 enum ActiveState {
     Handshake(HandshakeState),
-    // Status(StatusState),
+    Status(StatusState),
     // Login(LoginState),
     // Play(PlayState),
 }
@@ -89,11 +89,11 @@ impl<S: Read + Write + Unpin + Send> ConnectionState<S> {
                     .handle_transaction(packet, &self.server_data, &mut comms)
                     .await
             }
-            // ActiveState::Status(state) => {
-            //     state
-            //         .handle_transaction(packet, &self.server_data, &mut comms)
-            //         .await
-            // },
+            ActiveState::Status(state) => {
+                state
+                    .handle_transaction(packet, &self.server_data, &mut comms)
+                    .await
+            }
             // ActiveState::Login(state) => {
             //     state
             //         .handle_transaction(packet, &self.server_data, &mut comms)
