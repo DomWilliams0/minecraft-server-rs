@@ -1,5 +1,9 @@
+use async_std::io::Write;
+
+use async_trait::async_trait;
+pub use handshake::*;
+
 use crate::error::McResult;
-use std::io::Write;
 
 pub type PacketId = i32;
 
@@ -12,20 +16,21 @@ pub trait Packet {
     const ID: PacketId;
 }
 
+#[async_trait]
 pub trait ClientBound: Packet {
-    fn write<W: Write>(&self, w: &mut W) -> McResult<()>;
+    async fn write_packet<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()>;
 }
 
+#[async_trait]
 pub trait ServerBound: Sized + Packet {
-    fn read(body: PacketBody) -> McResult<Self>;
+    async fn read_packet(body: PacketBody) -> McResult<Self>;
 }
 
 mod handshake;
-mod login;
-mod status;
-mod play;
+// mod login;
+// mod status;
+// mod play;
 
-pub use handshake::*;
-pub use login::*;
-pub use status::*;
-pub use play::*;
+// pub use login::*;
+// pub use status::*;
+// pub use play::*;

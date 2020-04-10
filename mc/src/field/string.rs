@@ -1,7 +1,13 @@
-use crate::error::{McError, McResult};
-use crate::field::*;
 use std::convert::TryFrom;
-use std::io::{Read, Write};
+
+use async_std::io::prelude::WriteExt;
+use async_std::io::{Read, Write};
+use futures::AsyncReadExt;
+
+use async_trait::async_trait;
+
+use crate::error::{McError, McResult};
+use crate::field::{Field, VarIntField};
 
 #[derive(Debug)]
 pub struct StringField {
@@ -27,6 +33,7 @@ impl StringField {
     }
 }
 
+#[async_trait]
 impl Field for StringField {
     type Displayable = String;
 
@@ -38,21 +45,23 @@ impl Field for StringField {
         self.length.size() + self.length.value() as usize
     }
 
-    fn read<R: Read>(r: &mut R) -> McResult<Self> {
-        let length = VarIntField::read(r)?.value() as usize;
+    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
+        let length = VarIntField::read_field(r).await?.value() as usize;
         let value = {
             let mut vec = vec![0u8; length];
-            r.read_exact(&mut vec).map_err(McError::Io)?;
+            r.read_exact(&mut vec).await.map_err(McError::Io)?;
             String::from_utf8(vec).map_err(|_| McError::BadString)?
         };
 
         Ok(Self::new(value))
     }
 
-    fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
-        self.length.write(w)?;
+    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+        self.length.write_field(w).await?;
 
-        w.write_all(self.value.as_bytes()).map_err(McError::Io)
+        w.write_all(self.value.as_bytes())
+            .await
+            .map_err(McError::Io)
     }
 }
 
@@ -69,6 +78,7 @@ impl ChatField {
     }
 }
 
+#[async_trait]
 impl Field for ChatField {
     type Displayable = String;
 
@@ -80,13 +90,13 @@ impl Field for ChatField {
         self.string.size()
     }
 
-    fn read<R: Read>(r: &mut R) -> McResult<Self> {
+    async fn read_field<R: Read + Unpin + Send>(r: &mut R) -> McResult<Self> {
         Ok(Self {
-            string: StringField::read(r)?,
+            string: StringField::read_field(r).await?,
         })
     }
 
-    fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
-        self.string.write(w)
+    async fn write_field<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
+        self.string.write_field(w).await
     }
 }

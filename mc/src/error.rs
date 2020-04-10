@@ -1,14 +1,14 @@
+use std::fmt::{Display, Formatter};
 use std::io;
 
 use crate::packet::PacketId;
-
-use std::fmt::{Display, Formatter};
 
 pub type McResult<T> = Result<T, McError>;
 
 #[derive(Debug)]
 pub enum McError {
     Io(io::Error),
+    IoChannel(futures::channel::mpsc::SendError),
     StreamFlush(String),
     BadVarInt,
     BadPacketLength(usize),

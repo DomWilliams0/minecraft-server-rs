@@ -1,12 +1,12 @@
-use std::io::Cursor;
-
-use crate::field::DisplayableField;
-use log::*;
 use std::fmt::{Display, Formatter};
+
+use async_std::io::Cursor;
+use log::*;
 
 use mc_packet_derive::ServerBoundPacket;
 
 use crate::error::{McError, McResult};
+use crate::field::DisplayableField;
 use crate::field::*;
 use crate::packet::*;
 

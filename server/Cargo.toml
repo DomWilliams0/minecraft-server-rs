@@ -10,3 +10,7 @@ edition = "2018"
 mc = {path = "../mc"}
 log = "^0.4"
 env_logger = "^0.7"
+slab = "^0.4"
+
+async-std = "^1.5"
+futures = "^0.3"

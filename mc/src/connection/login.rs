@@ -1,13 +1,17 @@
-use crate::connection::comms::{ActiveComms, Stream};
-use crate::connection::{ActiveState, LoginState, PlayState, State};
-use crate::error::{McError, McResult};
-use crate::field::*;
-use crate::packet::*;
-use crate::server::{OnlineStatus, ServerDataRef};
+use async_std::io::prelude::*;
+use async_trait::async_trait;
+use futures::{FutureExt, TryFutureExt};
 use log::*;
 use std::mem;
 use uuid::adapter::HyphenatedRef;
 use uuid::Uuid;
+
+use crate::connection::{ActiveState, LoginState, PlayState, State};
+use crate::connection::comms::ActiveComms;
+use crate::error::{McError, McResult};
+use crate::field::*;
+use crate::packet::*;
+use crate::server::{OnlineStatus, ServerDataRef};
 
 fn generate_verify_token() -> McResult<Vec<u8>> {
     let mut token = vec![0u8; 2];
@@ -17,30 +21,32 @@ fn generate_verify_token() -> McResult<Vec<u8>> {
 
 const SERVER_ID: &str = "";
 
-impl<S: Stream> State<S> for LoginState {
-    fn handle_transaction(
+#[async_trait]
+impl<S: Read + Write + Unpin + Send> State<S> for LoginState {
+    async fn handle_transaction(
         self,
         packet: PacketBody,
         server_data: &ServerDataRef,
         comms: &mut ActiveComms<S>,
     ) -> McResult<ActiveState> {
-        let ret = self.do_handle(packet, server_data, comms);
+        self.do_handle(packet, server_data, comms)
+            .then(|result| async {
+                if let Err(e) = &result {
+                    let disconnect = Disconnect {
+                        reason: ChatField::new(format!("Error: {}", e)),
+                    };
 
-        if let Err(e) = &ret {
-            let disconnect = Disconnect {
-                reason: ChatField::new(format!("Error: {}", e)),
-            };
+                    // ignore error
+                    let _ = disconnect.write_packet(comms).await;
+                }
 
-            // ignore error
-            let _ = disconnect.write(comms);
-        }
-
-        ret
+                result
+            }).await
     }
 }
 
 impl LoginState {
-    fn do_handle<S: Stream>(
+    async fn do_handle<S: Read + Write + Unpin + Send>(
         mut self,
         packet: PacketBody,
         server_data: &ServerDataRef,
@@ -48,7 +54,7 @@ impl LoginState {
     ) -> McResult<ActiveState> {
         match packet.id {
             LoginStart::ID => {
-                let login_start = LoginStart::read(packet)?;
+                let login_start = LoginStart::read_packet(packet).await?;
                 let player_name = login_start.name.take();
 
                 info!("player '{}' is joining", player_name);
@@ -60,8 +66,9 @@ impl LoginState {
                         let (login_success, play_state) =
                             self.into_play_state(player_name, player_uuid)?;
 
-                        login_success.write(comms)?;
-                        Ok(ActiveState::Play(play_state))
+                        login_success.write_packet(comms).await?;
+                        todo!()
+                        // Ok(ActiveState::Play(play_state))
                     }
                     OnlineStatus::Online { public_key } => {
                         let verify_token = generate_verify_token()?;
@@ -73,7 +80,7 @@ impl LoginState {
                             verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
                         };
 
-                        enc_req.write(comms)?;
+                        enc_req.write_packet(comms).await?;
 
                         let new_state = LoginState {
                             player_name,
@@ -85,7 +92,7 @@ impl LoginState {
                 }
             }
             EncryptionResponse::ID => {
-                let enc_resp = EncryptionResponse::read(packet)?;
+                let enc_resp = EncryptionResponse::read_packet(packet).await?;
 
                 {
                     let (decrypted_token, decrypted_shared_secret, public_key) = {
@@ -125,8 +132,9 @@ impl LoginState {
                     let (login_success, play_state) =
                         self.into_play_state(player_name, auth_response.uuid)?;
 
-                    login_success.write(comms)?;
-                    Ok(ActiveState::Play(play_state))
+                    login_success.write_packet(comms).await?;
+                    todo!()
+                    // Ok(ActiveState::Play(play_state))
                 }
             }
             x => Err(McError::BadPacketId(x)),
@@ -161,12 +169,13 @@ impl LoginState {
 }
 
 mod auth {
-    use crate::error::{McError, McResult};
     use log::*;
     use num::BigInt;
     use openssl::sha::Sha1;
     use std::str::FromStr;
     use uuid::Uuid;
+
+    use crate::error::{McError, McResult};
 
     pub struct AuthResponse {
         pub uuid: Uuid,

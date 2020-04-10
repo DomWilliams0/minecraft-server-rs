@@ -1,14 +1,13 @@
-use std::io::{Cursor, Write};
-
-use crate::field::DisplayableField;
+use async_std::io::{Cursor, Write};
+use async_trait::async_trait;
 use log::*;
-
 use mc_packet_derive::{ClientBoundPacket, ServerBoundPacket};
+use std::fmt::{Display, Formatter};
 
 use crate::error::{McError, McResult};
 use crate::field::*;
+use crate::field::DisplayableField;
 use crate::packet::*;
-use std::fmt::{Display, Formatter};
 
 #[derive(ServerBoundPacket)]
 #[packet_id = 0x00]

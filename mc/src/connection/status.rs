@@ -1,12 +1,17 @@
-use crate::connection::comms::{ActiveComms, Stream};
-use crate::connection::{ActiveState, State, StatusState};
+use async_std::io::prelude::*;
+use async_trait::async_trait;
+
+use crate::connection::{ActiveState, HandshakeState, LoginState, State, StatusState};
+use crate::connection::comms::ActiveComms;
 use crate::error::{McError, McResult};
-use crate::field::*;
+use crate::field::StringField;
 use crate::packet::*;
+use crate::packet::PacketBody;
 use crate::server::ServerDataRef;
 
-impl<S: Stream> State<S> for StatusState {
-    fn handle_transaction(
+#[async_trait]
+impl<S: Read + Write + Unpin + Send> State<S> for StatusState {
+    async fn handle_transaction(
         self,
         packet: PacketBody,
         _server_data: &ServerDataRef,
@@ -14,7 +19,7 @@ impl<S: Stream> State<S> for StatusState {
     ) -> McResult<ActiveState> {
         match packet.id {
             Empty::ID => {
-                let _empty = Empty::read(packet)?;
+                let _empty = Empty::read_packet(packet).await?;
 
                 let status = StatusResponse {
                     json_response: StringField::new(generate_json(
@@ -23,16 +28,16 @@ impl<S: Stream> State<S> for StatusState {
                     )),
                 };
 
-                status.write(comms)?;
+                status.write_packet(comms).await?;
                 Ok(ActiveState::Status(self))
             }
             Ping::ID => {
-                let ping = Ping::read(packet)?;
+                let ping = Ping::read_packet(packet).await?;
                 let pong = Pong {
                     payload: ping.payload,
                 };
 
-                pong.write(comms)?;
+                pong.write_packet(comms).await?;
                 Err(McError::PleaseDisconnect)
             }
             x => Err(McError::BadPacketId(x)),

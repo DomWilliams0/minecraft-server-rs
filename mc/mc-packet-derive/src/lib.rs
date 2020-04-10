@@ -91,9 +91,10 @@ pub fn server_packet(input: TokenStream) -> TokenStream {
             const ID: PacketId = #packet_id;
         }
 
+        #[async_trait]
         impl ServerBound for #name {
 
-            fn read(body: PacketBody) -> McResult<Self> {
+            async fn read_packet(body: PacketBody) -> McResult<Self> {
                 if body.id != Self::ID {
                     return Err(McError::UnexpectedPacket {
                         expected: Self::ID,
@@ -103,7 +104,7 @@ pub fn server_packet(input: TokenStream) -> TokenStream {
 
                 let mut cursor = Cursor::new(body.body);
 
-                #( let #field_names = <#field_types>::read(&mut cursor)?;)*
+                #( let #field_names = <#field_types>::read_field(&mut cursor).await?;)*
 
                 let packet = Self {
                     #( #field_names ),*
@@ -147,9 +148,10 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
             const ID: PacketId = #packet_id;
         }
 
+        #[async_trait]
         impl ClientBound for #name {
 
-            fn write<W: Write>(&self, w: &mut W) -> McResult<()> {
+            async fn write_packet<W: Write + Unpin + Send>(&self, w: &mut W) -> McResult<()> {
                 let packet_id = VarIntField::new(Self::ID);
                 let len = {
                     let mut len = 0;
@@ -162,10 +164,10 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
 
                 trace!("sending packet id {:#x} of {} bytes: {}", Self::ID, len.value(), self);
 
-                len.write(w)?;
-                packet_id.write(w)?;
+                len.write_field(w).await?;
+                packet_id.write_field(w).await?;
 
-                #( self.#field_names.write(w)?; )*
+                #( self.#field_names.write_field(w).await?; )*
 
                 Ok(())
 
@@ -180,12 +182,4 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
     };
 
     result.into()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
 }
