@@ -1,92 +1,148 @@
-use std::pin::Pin;
-
-use async_std::task::{Context, Poll};
-
+use crate::field::*;
+use crate::packet::{ClientBound, ClientBoundPacket, PacketBody};
 use crate::prelude::*;
+use async_std::io::ErrorKind;
+use async_std::sync::{Arc, RwLock};
+use futures::{Sink, SinkExt};
+use openssl::symm::{encrypt, Cipher};
+use std::ops::Deref;
 
-// TODO delegate?
-pub(crate) enum ActiveComms<S: McStream> {
-    Plaintext { stream: S },
-    // Encrypted {
-    //     reader: Decryptor<S>,
-    //     writer: Encryptor<S>,
-    // },
+#[async_trait]
+pub trait ResponseSink: Sink<ClientBoundPacket> + Unpin + Send + Sync {}
+
+impl<S: Sink<ClientBoundPacket> + Unpin + Send + Sync> ResponseSink for S {}
+
+pub enum Encryption {
+    Plaintext,
+    Encrypted {
+        shared_secret: Vec<u8>,
+        cipher: Cipher,
+    },
+}
+
+pub type CommsEncryption = Arc<RwLock<Encryption>>;
+
+pub struct ActiveComms<S: McStream> {
+    encryption: CommsEncryption,
+    stream: S,
+}
+
+pub struct CommsRef<R: ResponseSink> {
+    response_sink: R,
+    encryption: CommsEncryption,
+}
+impl<R: ResponseSink> CommsRef<R> {
+    pub fn new(response_sink: R, encryption: CommsEncryption) -> Self {
+        Self {
+            response_sink,
+            encryption,
+        }
+    }
+
+    pub(crate) async fn send_response<P: ClientBound + Sync + Send>(
+        &mut self,
+        packet: P,
+    ) -> McResult<()> {
+        let c = self.serialize_packet(packet).await?;
+        self.response_sink.send(c).await.map_err(|_| McError::Sink)
+    }
+
+    pub async fn upgrade(&self, shared_secret: Vec<u8>) {
+        let mut guard = self.encryption.write().await;
+        *guard = Encryption::Encrypted {
+            shared_secret,
+            cipher: Cipher::aes_128_cfb8(),
+        }
+    }
+
+    pub async fn close(&mut self) -> McResult<()> {
+        self.response_sink.close().await.map_err(|_| McError::Sink)
+    }
+
+    async fn serialize_packet<P: ClientBound + Sync + Send>(
+        &mut self,
+        packet: P,
+    ) -> McResult<ClientBoundPacket> {
+        let enc = self.encryption.read().await;
+        let plaintext = ClientBoundPacket::from(packet);
+
+        match enc.deref() {
+            Encryption::Plaintext => Ok(plaintext),
+            Encryption::Encrypted {
+                shared_secret,
+                cipher,
+            } => {
+                // TODO use Frame to encrypt a stream instead of double allocing
+                encrypt(*cipher, &shared_secret, Some(&shared_secret), &plaintext)
+                    .map(ClientBoundPacket::from)
+                    .map_err(McError::OpenSSL)
+            }
+        }
+    }
 }
 
 impl<S: McStream> ActiveComms<S> {
-    pub fn new(stream: S) -> Self {
-        ActiveComms::Plaintext { stream }
-    }
-}
+    pub fn new(reader: S, writer: S) -> (Self, Self, CommsEncryption) {
+        let enc = Arc::new(RwLock::new(Encryption::Plaintext));
 
-impl<S: McStream> Read for ActiveComms<S> {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<IoResult<usize>> {
-        match self.get_mut() {
-            ActiveComms::Plaintext { stream } => Pin::new(stream).poll_read(cx, buf),
-            // ActiveComms::Encrypted { reader, .. } => reader.read(buf),
+        let r = Self {
+            encryption: enc.clone(),
+            stream: reader,
+        };
+
+        let w = Self {
+            encryption: enc.clone(),
+            stream: writer,
+        };
+
+        (r, w, enc)
+    }
+
+    /// Should already be encrypted
+    pub async fn send_packet(&mut self, packet: ClientBoundPacket) -> McResult<()> {
+        // let enc = self.encryption.read().await;
+        // let blob = enc.serialize_packet(packet)?;
+        self.stream.write_all(&packet).await.map_err(McError::Io)
+    }
+
+    //noinspection RsUnresolvedReference - idk why read_exact isn't found by the IDE
+    pub async fn read_packet(&mut self) -> McResult<PacketBody> {
+        // TODO DECRYPT STREAM
+        let mut length = match VarIntField::read_field(&mut self.stream).await {
+            Err(McError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
+                debug!("eof");
+                return Err(McError::PleaseDisconnect);
+            }
+
+            Err(e) => return Err(e),
+            Ok(len) => len.value(),
+        };
+
+        if length < 1 || length > 65535 {
+            return Err(McError::BadPacketLength(length as usize));
         }
-    }
-}
 
-impl<S: McStream> Write for ActiveComms<S> {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<IoResult<usize>> {
-        match self.get_mut() {
-            ActiveComms::Plaintext { stream } => Pin::new(stream).poll_write(cx, buf),
-            // ActiveComms::Encrypted { reader, .. } => reader.read(buf),
+        debug!("packet length={}", length);
+
+        let packet_id = {
+            let varint = VarIntField::read_field(&mut self.stream).await?;
+            length -= varint.size() as i32; // length includes packet id
+            varint.value()
+        };
+
+        debug!("packet id={:#x}", packet_id);
+
+        let mut recv_buf = vec![0u8; length as usize]; // TODO somehow reuse a buffer in self without making borrowck shit itself
+        if length > 0 {
+            self.stream
+                .read_exact(&mut recv_buf)
+                .await
+                .map_err(McError::Io)?;
         }
-    }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
-        match self.get_mut() {
-            ActiveComms::Plaintext { stream } => Pin::new(stream).poll_flush(cx),
-            // ActiveComms::Encrypted { reader, .. } => reader.read(buf),
-        }
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<IoResult<()>> {
-        match self.get_mut() {
-            ActiveComms::Plaintext { stream } => Pin::new(stream).poll_close(cx),
-            // ActiveComms::Encrypted { reader, .. } => reader.read(buf),
-        }
-    }
-}
-//
-// impl<S: McStream> Write for ActiveComms<S> {
-//     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-//         match self {
-//             ActiveComms::Plaintext { stream } => stream.write(buf),
-//             // ActiveComms::Encrypted { writer, .. } => writer.write(buf),
-//         }
-//     }
-//
-//     fn flush(&mut self) -> std::io::Result<()> {
-//         match self {
-//             ActiveComms::Plaintext { stream } => stream.flush(),
-//             // ActiveComms::Encrypted { writer, .. } => writer.flush(),
-//         }
-//     }
-// }
-
-impl<S: McStream> ActiveComms<S> {
-    pub fn upgrade(&mut self, shared_secret: Vec<u8>) -> McResult<()> {
-        // if let ActiveComms::Plaintext { stream } = self {
-        //     let r = stream.try_clone()?;
-        //     let w = stream.try_clone()?;
-        //
-        //     let cipher = Cipher::aes_128_cfb8();
-        //     *self = ActiveComms::Encrypted {
-        //         reader: Decryptor::new(r, cipher, &shared_secret, &shared_secret)
-        //             .map_err(McError::OpenSSL)?,
-        //         writer: Encryptor::new(w, cipher, &shared_secret, &shared_secret)
-        //             .map_err(McError::OpenSSL)?,
-        //     };
-        // }
-        //
-        // Ok(())
-        todo!()
+        Ok(PacketBody {
+            id: packet_id,
+            body: recv_buf,
+        })
     }
 }

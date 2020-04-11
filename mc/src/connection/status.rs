@@ -1,4 +1,5 @@
-use crate::connection::{ActiveState, ResponseSink, State, StatusState};
+use crate::connection::comms::{CommsRef, ResponseSink};
+use crate::connection::{ActiveState, State, StatusState};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
@@ -10,7 +11,7 @@ impl<R: ResponseSink> State<R> for StatusState {
         self,
         packet: PacketBody,
         _server_data: &ServerData,
-        response_sink: &mut R,
+        comms: &mut CommsRef<R>,
     ) -> McResult<ActiveState> {
         match packet.id {
             Empty::ID => {
@@ -23,7 +24,7 @@ impl<R: ResponseSink> State<R> for StatusState {
                     )),
                 };
 
-                response_sink.send_packet(status).await?;
+                comms.send_response(status).await?;
 
                 Ok(ActiveState::Status(self))
             }
@@ -32,7 +33,7 @@ impl<R: ResponseSink> State<R> for StatusState {
                 let pong = Pong {
                     payload: ping.payload,
                 };
-                response_sink.send_packet(pong).await?;
+                comms.send_response(pong).await?;
 
                 Err(McError::PleaseDisconnect)
             }

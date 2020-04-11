@@ -1,6 +1,5 @@
-use crate::connection::{
-    ActiveState, HandshakeState, LoginState, ResponseSink, State, StatusState,
-};
+use crate::connection::comms::{CommsRef, ResponseSink};
+use crate::connection::{ActiveState, HandshakeState, LoginState, State, StatusState};
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerData;
@@ -11,7 +10,7 @@ impl<R: ResponseSink> State<R> for HandshakeState {
         self,
         packet: PacketBody,
         _server_data: &ServerData,
-        _response_sink: &mut R,
+        _comms: &mut CommsRef<R>,
     ) -> McResult<ActiveState> {
         let handshake = Handshake::read_packet(packet).await?;
 

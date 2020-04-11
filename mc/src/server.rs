@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use openssl::pkey::Private;
 use openssl::rsa::{Padding, Rsa};
 

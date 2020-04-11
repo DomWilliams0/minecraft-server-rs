@@ -1,9 +1,8 @@
-use async_std::io::{Cursor, Write};
 use log::*;
 use mc_packet_derive::{ClientBoundPacket, ServerBoundPacket};
 use std::fmt::{Display, Formatter};
 
-use crate::error::{McError, McResult};
+use crate::error::McResult;
 use crate::field::*;
 use crate::packet::*;
 

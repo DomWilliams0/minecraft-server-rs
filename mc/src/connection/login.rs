@@ -1,21 +1,14 @@
 use std::mem;
 
-use async_std::io::prelude::*;
-use futures::{FutureExt, TryFutureExt};
-use log::*;
 use uuid::adapter::HyphenatedRef;
 use uuid::Uuid;
 
-use async_trait::async_trait;
-
-use crate::connection::comms::ActiveComms;
-use crate::connection::{ActiveState, LoginState, PlayState, ResponseSink, State};
-use crate::error::{McError, McResult};
+use crate::connection::comms::{CommsRef, ResponseSink};
+use crate::connection::{ActiveState, LoginState, PlayState, State};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::{OnlineStatus, ServerData};
-use async_std::task;
 
 fn generate_verify_token() -> McResult<Vec<u8>> {
     let mut token = vec![0u8; 2];
@@ -31,7 +24,7 @@ impl<R: ResponseSink> State<R> for LoginState {
         mut self,
         packet: PacketBody,
         server_data: &ServerData,
-        response_sink: &mut R,
+        comms: &mut CommsRef<R>,
     ) -> McResult<ActiveState> {
         let result = async {
             match packet.id {
@@ -47,9 +40,8 @@ impl<R: ResponseSink> State<R> for LoginState {
                             let (login_success, play_state) =
                                 self.into_play_state(player_name, player_uuid)?;
 
-                            response_sink.send_packet(login_success).await?;
-                            todo!()
-                            // Ok(ActiveState::Play(play_state))
+                            comms.send_response(login_success).await?;
+                            Ok(ActiveState::Play(play_state))
                         }
                         OnlineStatus::Online { public_key } => {
                             let verify_token = generate_verify_token()?;
@@ -61,7 +53,7 @@ impl<R: ResponseSink> State<R> for LoginState {
                                 verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
                             };
 
-                            response_sink.send_packet(enc_req).await?;
+                            comms.send_response(enc_req).await?;
 
                             let new_state = LoginState {
                                 player_name,
@@ -95,7 +87,7 @@ impl<R: ResponseSink> State<R> for LoginState {
 
                         let player_name = mem::take(&mut self.player_name);
                         debug!("enabling AES packet encryption for player {}", player_name);
-                        // TODO comms.upgrade(decrypted_shared_secret.clone())?;
+                        comms.upgrade(decrypted_shared_secret.clone()).await;
 
                         debug!("authenticating player with mojang");
                         let auth_response = auth::auth(
@@ -112,27 +104,25 @@ impl<R: ResponseSink> State<R> for LoginState {
                         let (login_success, play_state) =
                             self.into_play_state(player_name, auth_response.uuid)?;
 
-                        response_sink.send_packet(login_success).await?;
-                        todo!()
-                        // Ok(ActiveState::Play(play_state))
+                        comms.send_response(login_success).await?;
+                        Ok(ActiveState::Play(play_state))
                     }
                 }
                 x => Err(McError::BadPacketId(x)),
             }
-        };
+        }
+        .await;
 
-        // TODO disconnect on error
-        // result.or_else(|e| {
-        //
-        //     let disconnect = Disconnect {
-        //         reason: ChatField::new(format!("Error: {}", e)),
-        //     };
-        //
-        //     // ignore error
-        //     let _ = response_sink.send_packet(disconnect);
-        // }).await
+        if let Err(e) = &result {
+            let disconnect = Disconnect {
+                reason: ChatField::new(format!("Error: {}", e)),
+            };
 
-        result.await
+            // ignore error
+            let _ = comms.send_response(disconnect).await;
+        }
+
+        result
     }
 }
 

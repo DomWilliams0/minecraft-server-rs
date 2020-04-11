@@ -1,13 +1,13 @@
-use async_std::io::{self, prelude::*};
+use async_std::io::{self};
 use async_std::net::{TcpListener, TcpStream};
-use async_std::prelude::*;
 use async_std::task;
 use futures::channel::mpsc;
 use futures::channel::mpsc::unbounded;
 use log::*;
 
 use async_std::sync::Arc;
-use mc::connection::ConnectionState;
+use futures::{pin_mut, select, FutureExt, SinkExt, StreamExt};
+use mc::connection::{ActiveComms, CommsRef, ConnectionState};
 use mc::error::{McError, McResult};
 use mc::packet::ClientBoundPacket;
 use mc::server::ServerData;
@@ -30,27 +30,42 @@ async fn handle_client(
     //     .await
     //     .map_err(McError::IoChannel)?;
 
-    let (reader, mut writer) = (stream.clone(), stream);
+    let (mut reader, mut writer, encryption) = {
+        let (r, w) = (stream.clone(), stream);
+        ActiveComms::new(r, w)
+    };
 
-    // spawn writer loop
-    let _write_loop = task::spawn(async move {
-        while let Some(packet) = clientbound_rx.next().await {
-            writer.write_all(&packet).await.expect("send failed"); // TODO error propagation?
-        }
-    });
-
-    // reader loop - all socket io must happen in the ConnectionState
-    let mut connection = ConnectionState::new(reader, clientbound_tx);
+    let comms = CommsRef::new(clientbound_tx, encryption);
+    let mut connection = ConnectionState::new(comms);
 
     loop {
-        let packet = match connection.read_packet().await {
-            Ok(p) => p,
-            Err(e) => break Err(e),
-        };
+        let serverbound = async { reader.read_packet().await }.fuse();
 
-        if let Err(e) = connection.handle_packet(packet, &server_data).await {
-            break Err(e);
-        };
+        let clientbound = clientbound_rx.next().map(|p| p.expect("NONE?")).fuse();
+
+        pin_mut!(serverbound, clientbound);
+
+        if let Err(e) = select! {
+            // recvd a packet from client
+            packet = serverbound => {
+                match packet {
+                    Err(e) => break Err(e),
+                    Ok(packet) => connection.handle_packet(packet, &server_data).await,
+                }
+            },
+            // got a packet in outgoing queue to send to client
+            packet = clientbound => writer.send_packet(packet).await,
+        } {
+            drop(serverbound);
+            drop(clientbound);
+
+            // flush clientbound queue
+            while let Ok(Some(outgoing)) = clientbound_rx.try_next() {
+                let _ = writer.send_packet(outgoing).await;
+            }
+
+            break McResult::<()>::Err(e);
+        }
     }
 }
 
@@ -59,8 +74,8 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
     info!("listening on {}:{}", host, port);
 
     // start broker task
-    let (broker_tx, broker_rx) = mpsc::unbounded();
-    let _ = task::spawn(run_broker(broker_rx));
+    // let (broker_tx, broker_rx) = mpsc::unbounded();
+    // let _ = task::spawn(run_broker(broker_rx));
 
     // start client loop
     let mut incoming = listener.incoming();

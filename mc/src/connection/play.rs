@@ -1,4 +1,5 @@
-use crate::connection::{ActiveState, PlayState, ResponseSink, State};
+use crate::connection::comms::{CommsRef, ResponseSink};
+use crate::connection::{ActiveState, PlayState, State};
 use crate::packet::PacketBody;
 use crate::prelude::*;
 use crate::server::ServerData;
@@ -13,8 +14,8 @@ impl<R: ResponseSink> State<R> for PlayState {
     async fn handle_transaction(
         mut self,
         packet: PacketBody,
-        server_data: &ServerData,
-        response_sink: &mut R,
+        _server_data: &ServerData,
+        _comms: &mut CommsRef<R>,
     ) -> McResult<ActiveState> {
         match packet.id {
             x => Err(McError::BadPacketId(x)),

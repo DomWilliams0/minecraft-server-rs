@@ -7,7 +7,6 @@ use mc_packet_derive::{ClientBoundPacket, ServerBoundPacket};
 use crate::field::DisplayableField;
 use crate::field::*;
 use crate::packet::*;
-use crate::prelude::*;
 
 #[derive(ServerBoundPacket)]
 #[packet_id = 0x00]

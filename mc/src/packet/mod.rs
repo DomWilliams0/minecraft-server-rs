@@ -18,6 +18,8 @@ pub trait Packet {
 #[async_trait]
 pub trait ClientBound: Packet {
     async fn write_packet<W: McWrite>(&self, w: &mut W) -> McResult<()>;
+
+    fn size(&self) -> usize;
 }
 
 #[async_trait]
@@ -35,6 +37,12 @@ impl<P: ClientBound> From<P> for ClientBoundPacket {
         async_std::task::block_on(packet.write_packet(&mut cursor))
             .expect("writing packet to cursor should not fail"); // TODO really?
         Self(cursor.into_inner().into_boxed_slice())
+    }
+}
+
+impl From<Vec<u8>> for ClientBoundPacket {
+    fn from(vec: Vec<u8>) -> Self {
+        Self(vec.into_boxed_slice())
     }
 }
 

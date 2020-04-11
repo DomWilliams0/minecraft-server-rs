@@ -153,14 +153,7 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
 
             async fn write_packet<W: McWrite>(&self, w: &mut W) -> McResult<()> {
                 let packet_id = VarIntField::new(Self::ID);
-                let len = {
-                    let mut len = 0;
-                    len += packet_id.size();
-
-                    #( len += self.#field_names.size(); )*
-
-                    VarIntField::new(len as i32)
-                };
+                let len = VarIntField::new(self.size() as i32);
 
                 // TODO resize writer to exact size - limit to Cursor or make own trait for it?
 
@@ -173,6 +166,16 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
 
                 Ok(())
 
+            }
+
+            fn size(&self) -> usize {
+                let packet_id = VarIntField::new(Self::ID);
+                let mut len = 0;
+                len += packet_id.size();
+
+                #( len += self.#field_names.size(); )*
+
+                len
             }
         }
 

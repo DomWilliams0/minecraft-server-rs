@@ -8,7 +8,7 @@ pub type McResult<T> = Result<T, McError>;
 #[derive(Debug)]
 pub enum McError {
     Io(io::Error),
-    ResponseSink,
+    Sink,
     BadBool,
     StreamFlush(String),
     BadVarInt,
