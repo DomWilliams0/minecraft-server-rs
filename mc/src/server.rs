@@ -7,7 +7,7 @@ use crate::config;
 use crate::error::{McError, McResult};
 
 // TODO don't need to wrap the whole struct in mutex?
-pub type ServerDataRef = Arc<Mutex<ServerData>>;
+// pub type &ServerData = Arc<Mutex<ServerData>>;
 
 pub enum OnlineStatus {
     Online { public_key: Vec<u8> },
@@ -19,13 +19,13 @@ pub struct ServerData {
 }
 
 impl ServerData {
-    pub fn new() -> McResult<ServerDataRef> {
-        let data = Self {
+    pub fn new() -> McResult<Self> {
+        Ok(Self {
             // TODO only generate if online
             rsa_key: Rsa::generate(1024).map_err(McError::OpenSSL)?,
-        };
+        })
 
-        Ok(Arc::new(Mutex::new(data)))
+        // Ok(Arc::new(Mutex::new(data)))
     }
 
     pub fn public_key(&self) -> McResult<Vec<u8>> {

@@ -2,9 +2,6 @@ use std::ops::Deref;
 
 use async_std::io::Cursor;
 
-pub use handshake::*;
-pub use status::*;
-
 use crate::prelude::*;
 
 pub type PacketId = i32;
@@ -50,9 +47,11 @@ impl Deref for ClientBoundPacket {
 }
 
 mod handshake;
+mod login;
+mod play;
 mod status;
-// mod login;
-// mod play;
 
-// pub use login::*;
-// pub use play::*;
+pub use handshake::*;
+pub use login::*;
+pub use play::*;
+pub use status::*;

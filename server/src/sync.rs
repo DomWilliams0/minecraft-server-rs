@@ -5,9 +5,9 @@ use log::*;
 
 use mc::connection::ConnectionState;
 use mc::error::McError;
-use mc::server::{ServerData, ServerDataRef};
+use mc::server::{ServerData, &ServerData};
 
-fn handle_connection(server_data: ServerDataRef, stream: TcpStream) {
+fn handle_connection(server_data: &ServerData, stream: TcpStream) {
     let peer = stream.peer_addr().unwrap();
     trace!("hello {:?}", peer);
 

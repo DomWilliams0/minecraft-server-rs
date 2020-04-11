@@ -2,14 +2,14 @@ use crate::connection::{ActiveState, ResponseSink, State, StatusState};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
-use crate::server::ServerDataRef;
+use crate::server::ServerData;
 
 #[async_trait]
 impl<R: ResponseSink> State<R> for StatusState {
     async fn handle_transaction(
         self,
         packet: PacketBody,
-        _server_data: &ServerDataRef,
+        _server_data: &ServerData,
         response_sink: &mut R,
     ) -> McResult<ActiveState> {
         match packet.id {

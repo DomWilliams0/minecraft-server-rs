@@ -9,13 +9,13 @@ use crate::connection::comms::ActiveComms;
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
-use crate::server::ServerDataRef;
+use crate::server::ServerData;
 
 mod comms;
 mod handshake;
+mod login;
+mod play;
 mod status;
-// mod login;
-// mod play;
 
 pub trait McRead: Read + Unpin + Send {}
 pub trait McWrite: Write + Unpin + Send {}
@@ -40,7 +40,7 @@ trait State<R: ResponseSink> {
     async fn handle_transaction(
         self,
         packet: PacketBody,
-        server_data: &ServerDataRef,
+        server_data: &ServerData,
         response_sink: &mut R,
     ) -> McResult<ActiveState>;
 }
@@ -65,8 +65,8 @@ struct PlayState {
 enum ActiveState {
     Handshake(HandshakeState),
     Status(StatusState),
-    // Login(LoginState),
-    // Play(PlayState),
+    Login(LoginState),
+    Play(PlayState),
 }
 
 impl Default for ActiveState {
@@ -78,16 +78,14 @@ impl Default for ActiveState {
 pub struct ConnectionState<S: McStream, R: ResponseSink> {
     comms: Mutex<ActiveComms<S>>,
     state: ActiveState,
-    server_data: ServerDataRef,
     response_sink: R,
 }
 
 impl<S: McStream, R: ResponseSink> ConnectionState<S, R> {
-    pub fn new(server_data: ServerDataRef, stream: S, response_sink: R) -> Self {
+    pub fn new(stream: S, response_sink: R) -> Self {
         Self {
             comms: Mutex::new(ActiveComms::new(stream)),
             state: ActiveState::default(),
-            server_data,
             response_sink,
         }
     }
@@ -130,25 +128,34 @@ impl<S: McStream, R: ResponseSink> ConnectionState<S, R> {
         })
     }
 
-    pub async fn handle_packet(&mut self, packet: PacketBody) -> McResult<()> {
+    pub async fn handle_packet(
+        &mut self,
+        packet: PacketBody,
+        server_data: &ServerData,
+    ) -> McResult<()> {
         let state = std::mem::take(&mut self.state); // TODO is this safe?
 
         self.state = match state {
             ActiveState::Handshake(state) => {
                 state
-                    .handle_transaction(packet, &self.server_data, &mut self.response_sink)
+                    .handle_transaction(packet, server_data, &mut self.response_sink)
                     .await
             }
             ActiveState::Status(state) => {
                 state
-                    .handle_transaction(packet, &self.server_data, &mut self.response_sink)
+                    .handle_transaction(packet, server_data, &mut self.response_sink)
                     .await
             }
-            // ActiveState::Login(state) => {
-            //     state
-            //         .handle_transaction(packet, &self.server_data, &mut comms)
-            //         .await
-            // },
+            ActiveState::Login(state) => {
+                state
+                    .handle_transaction(packet, server_data, &mut self.response_sink)
+                    .await
+            }
+            ActiveState::Play(state) => {
+                state
+                    .handle_transaction(packet, server_data, &mut self.response_sink)
+                    .await
+            }
         }?;
         Ok(())
     }

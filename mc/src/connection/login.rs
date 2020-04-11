@@ -1,17 +1,21 @@
+use std::mem;
+
 use async_std::io::prelude::*;
-use async_trait::async_trait;
 use futures::{FutureExt, TryFutureExt};
 use log::*;
-use std::mem;
 use uuid::adapter::HyphenatedRef;
 use uuid::Uuid;
 
-use crate::connection::{ActiveState, LoginState, PlayState, State};
+use async_trait::async_trait;
+
 use crate::connection::comms::ActiveComms;
+use crate::connection::{ActiveState, LoginState, PlayState, ResponseSink, State};
 use crate::error::{McError, McResult};
 use crate::field::*;
 use crate::packet::*;
-use crate::server::{OnlineStatus, ServerDataRef};
+use crate::prelude::*;
+use crate::server::{OnlineStatus, ServerData};
+use async_std::task;
 
 fn generate_verify_token() -> McResult<Vec<u8>> {
     let mut token = vec![0u8; 2];
@@ -22,125 +26,117 @@ fn generate_verify_token() -> McResult<Vec<u8>> {
 const SERVER_ID: &str = "";
 
 #[async_trait]
-impl<S: McStream> State<S> for LoginState {
+impl<R: ResponseSink> State<R> for LoginState {
     async fn handle_transaction(
-        self,
+        mut self,
         packet: PacketBody,
-        server_data: &ServerDataRef,
-        comms: &mut ActiveComms<S>,
+        server_data: &ServerData,
+        response_sink: &mut R,
     ) -> McResult<ActiveState> {
-        self.do_handle(packet, server_data, comms)
-            .then(|result| async {
-                if let Err(e) = &result {
-                    let disconnect = Disconnect {
-                        reason: ChatField::new(format!("Error: {}", e)),
-                    };
+        let result = async {
+            match packet.id {
+                LoginStart::ID => {
+                    let login_start = LoginStart::read_packet(packet).await?;
+                    let player_name = login_start.name.take();
 
-                    // ignore error
-                    let _ = disconnect.write_packet(comms).await;
+                    info!("player '{}' is joining", player_name);
+                    match server_data.online_status()? {
+                        OnlineStatus::Offline => {
+                            // no auth
+                            let player_uuid = Uuid::new_v4();
+                            let (login_success, play_state) =
+                                self.into_play_state(player_name, player_uuid)?;
+
+                            response_sink.send_packet(login_success).await?;
+                            todo!()
+                            // Ok(ActiveState::Play(play_state))
+                        }
+                        OnlineStatus::Online { public_key } => {
+                            let verify_token = generate_verify_token()?;
+
+                            let enc_req = EncryptionRequest {
+                                server_id: StringField::new(SERVER_ID.to_owned()),
+
+                                pub_key: VarIntThenByteArrayField::new(public_key),
+                                verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
+                            };
+
+                            response_sink.send_packet(enc_req).await?;
+
+                            let new_state = LoginState {
+                                player_name,
+                                verify_token,
+                            };
+
+                            Ok(ActiveState::Login(new_state))
+                        }
+                    }
                 }
+                EncryptionResponse::ID => {
+                    let enc_resp = EncryptionResponse::read_packet(packet).await?;
 
-                result
-            }).await
+                    {
+                        let (decrypted_token, decrypted_shared_secret, public_key) = {
+                            let token = server_data.decrypt(&enc_resp.verify_token.bytes())?;
+                            let secret = server_data.decrypt(&enc_resp.shared_secret.bytes())?;
+                            let public_key = server_data.public_key()?;
+
+                            (token, secret, public_key)
+                        };
+
+                        // verify token decrypts to the same value
+                        if self.verify_token != decrypted_token {
+                            warn!(
+                                "verify token mismatch: expected {:?} but got {:?}",
+                                self.verify_token, decrypted_token
+                            );
+                            return Err(McError::VerifyTokenMismatch);
+                        }
+
+                        let player_name = mem::take(&mut self.player_name);
+                        debug!("enabling AES packet encryption for player {}", player_name);
+                        // TODO comms.upgrade(decrypted_shared_secret.clone())?;
+
+                        debug!("authenticating player with mojang");
+                        let auth_response = auth::auth(
+                            &player_name,
+                            SERVER_ID,
+                            &decrypted_shared_secret,
+                            &public_key,
+                        )?;
+                        debug!(
+                            "authenticated player with mojang, got uuid of {}",
+                            auth_response.uuid
+                        );
+
+                        let (login_success, play_state) =
+                            self.into_play_state(player_name, auth_response.uuid)?;
+
+                        response_sink.send_packet(login_success).await?;
+                        todo!()
+                        // Ok(ActiveState::Play(play_state))
+                    }
+                }
+                x => Err(McError::BadPacketId(x)),
+            }
+        };
+
+        // TODO disconnect on error
+        // result.or_else(|e| {
+        //
+        //     let disconnect = Disconnect {
+        //         reason: ChatField::new(format!("Error: {}", e)),
+        //     };
+        //
+        //     // ignore error
+        //     let _ = response_sink.send_packet(disconnect);
+        // }).await
+
+        result.await
     }
 }
 
 impl LoginState {
-    async fn do_handle<S: McStream>(
-        mut self,
-        packet: PacketBody,
-        server_data: &ServerDataRef,
-        comms: &mut ActiveComms<S>,
-    ) -> McResult<ActiveState> {
-        match packet.id {
-            LoginStart::ID => {
-                let login_start = LoginStart::read_packet(packet).await?;
-                let player_name = login_start.name.take();
-
-                info!("player '{}' is joining", player_name);
-                let server_data = server_data.lock().map_err(|_| McError::MutexUnlock)?;
-                match server_data.online_status()? {
-                    OnlineStatus::Offline => {
-                        // no auth
-                        let player_uuid = Uuid::new_v4();
-                        let (login_success, play_state) =
-                            self.into_play_state(player_name, player_uuid)?;
-
-                        login_success.write_packet(comms).await?;
-                        todo!()
-                        // Ok(ActiveState::Play(play_state))
-                    }
-                    OnlineStatus::Online { public_key } => {
-                        let verify_token = generate_verify_token()?;
-
-                        let enc_req = EncryptionRequest {
-                            server_id: StringField::new(SERVER_ID.to_owned()),
-
-                            pub_key: VarIntThenByteArrayField::new(public_key),
-                            verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
-                        };
-
-                        enc_req.write_packet(comms).await?;
-
-                        let new_state = LoginState {
-                            player_name,
-                            verify_token,
-                        };
-
-                        Ok(ActiveState::Login(new_state))
-                    }
-                }
-            }
-            EncryptionResponse::ID => {
-                let enc_resp = EncryptionResponse::read_packet(packet).await?;
-
-                {
-                    let (decrypted_token, decrypted_shared_secret, public_key) = {
-                        let server_data = server_data.lock().map_err(|_| McError::MutexUnlock)?;
-                        let token = server_data.decrypt(&enc_resp.verify_token.bytes())?;
-                        let secret = server_data.decrypt(&enc_resp.shared_secret.bytes())?;
-                        let public_key = server_data.public_key()?;
-
-                        (token, secret, public_key)
-                    };
-
-                    // verify token decrypts to the same value
-                    if self.verify_token != decrypted_token {
-                        warn!(
-                            "verify token mismatch: expected {:?} but got {:?}",
-                            self.verify_token, decrypted_token
-                        );
-                        return Err(McError::VerifyTokenMismatch);
-                    }
-
-                    let player_name = mem::take(&mut self.player_name);
-                    debug!("enabling AES packet encryption for player {}", player_name);
-                    comms.upgrade(decrypted_shared_secret.clone())?;
-
-                    debug!("authenticating player with mojang");
-                    let auth_response = auth::auth(
-                        &player_name,
-                        SERVER_ID,
-                        &decrypted_shared_secret,
-                        &public_key,
-                    )?;
-                    debug!(
-                        "authenticated player with mojang, got uuid of {}",
-                        auth_response.uuid
-                    );
-
-                    let (login_success, play_state) =
-                        self.into_play_state(player_name, auth_response.uuid)?;
-
-                    login_success.write_packet(comms).await?;
-                    todo!()
-                    // Ok(ActiveState::Play(play_state))
-                }
-            }
-            x => Err(McError::BadPacketId(x)),
-        }
-    }
-
     fn into_play_state(
         self,
         player_name: String,
@@ -169,10 +165,11 @@ impl LoginState {
 }
 
 mod auth {
+    use std::str::FromStr;
+
     use log::*;
     use num::BigInt;
     use openssl::sha::Sha1;
-    use std::str::FromStr;
     use uuid::Uuid;
 
     use crate::error::{McError, McResult};

@@ -6,10 +6,11 @@ use futures::channel::mpsc;
 use futures::channel::mpsc::unbounded;
 use log::*;
 
+use async_std::sync::Arc;
 use mc::connection::ConnectionState;
 use mc::error::{McError, McResult};
 use mc::packet::ClientBoundPacket;
-use mc::server::{ServerData, ServerDataRef};
+use mc::server::ServerData;
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
@@ -18,7 +19,7 @@ async fn handle_client(
     clientbound_tx: Sender<ClientBoundPacket>,
     mut clientbound_rx: Receiver<ClientBoundPacket>,
     stream: io::Result<TcpStream>,
-    server_data: ServerDataRef,
+    server_data: Arc<ServerData>,
 ) -> McResult<()> {
     let stream = stream.map_err(McError::Io)?;
     let peer = stream.peer_addr().map_err(McError::Io)?;
@@ -39,7 +40,7 @@ async fn handle_client(
     });
 
     // reader loop - all socket io must happen in the ConnectionState
-    let mut connection = ConnectionState::new(server_data, reader, clientbound_tx);
+    let mut connection = ConnectionState::new(reader, clientbound_tx);
 
     loop {
         let packet = match connection.read_packet().await {
@@ -47,13 +48,13 @@ async fn handle_client(
             Err(e) => break Err(e),
         };
 
-        if let Err(e) = connection.handle_packet(packet).await {
+        if let Err(e) = connection.handle_packet(packet, &server_data).await {
             break Err(e);
         };
     }
 }
 
-async fn accept_clients(host: &str, port: u16, server_data: ServerDataRef) -> McResult<()> {
+async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> McResult<()> {
     let listener = TcpListener::bind((host, port)).await.map_err(McError::Io)?;
     info!("listening on {}:{}", host, port);
 
@@ -102,7 +103,7 @@ async fn run_broker(broker_rx: Receiver<BrokerMessage>) {
 
 pub fn main() {
     // TODO start server thread
-    let server_data = ServerData::new().unwrap();
+    let server_data = Arc::new(ServerData::new().unwrap());
 
     let accept_future = accept_clients("127.0.0.1", 25565, server_data);
     if let Err(e) = task::block_on(accept_future) {
