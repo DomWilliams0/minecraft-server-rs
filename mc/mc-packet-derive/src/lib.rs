@@ -88,12 +88,15 @@ pub fn server_packet(input: TokenStream) -> TokenStream {
     let display = impl_display(name, &field_names);
     let result = quote! {
         impl Packet for #name {
-            const ID: PacketId = #packet_id;
+            // fn id() -> PacketId { Self::ID }
+        }
+
+        impl #name {
+            pub const ID: PacketId = #packet_id;
         }
 
         #[async_trait]
         impl ServerBound for #name {
-
             async fn read_packet(body: PacketBody) -> McResult<Self> {
                 if body.id != Self::ID {
                     return Err(McError::UnexpectedPacket {
@@ -145,15 +148,18 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
     let display = impl_display(name, &field_names);
     let result = quote! {
         impl Packet for #name {
-            const ID: PacketId = #packet_id;
+            // fn id() -> PacketId { Self::ID }
+        }
+
+        impl #name {
+            pub const ID: PacketId = #packet_id;
         }
 
         #[async_trait]
         impl ClientBound for #name {
-
-            async fn write_packet<W: McWrite>(&self, w: &mut W) -> McResult<()> {
+            async fn write_packet(&self, w: &mut Cursor<&mut [u8]>) -> McResult<()> {
                 let packet_id = VarIntField::new(Self::ID);
-                let len = VarIntField::new(self.size() as i32);
+                let len = VarIntField::new(self.length() as i32);
 
                 // TODO resize writer to exact size - limit to Cursor or make own trait for it?
 
@@ -168,7 +174,7 @@ pub fn client_packet(input: TokenStream) -> TokenStream {
 
             }
 
-            fn size(&self) -> usize {
+            fn length(&self) -> usize {
                 let packet_id = VarIntField::new(Self::ID);
                 let mut len = 0;
                 len += packet_id.size();

@@ -98,6 +98,12 @@ impl VarIntField {
     }
 }
 
+impl From<i32> for VarIntField {
+    fn from(i: i32) -> Self {
+        Self::new(i)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use async_std::io::Cursor;

@@ -58,3 +58,29 @@ impl Display for ByteArray {
         write!(f, "{:?}", self.0)
     }
 }
+
+pub struct RestOfPacketByteArrayField(ByteArray);
+
+#[async_trait]
+impl Field for RestOfPacketByteArrayField {
+    type Displayable = ByteArray;
+
+    fn value(&self) -> &Self::Displayable {
+        &self.0
+    }
+
+    fn size(&self) -> usize {
+        (self.0).0.len()
+    }
+
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
+        let mut vec = Vec::new();
+        let n = r.read_to_end(&mut vec).await.map_err(McError::Io)?;
+        debug_assert_ne!(n, 0);
+        Ok(Self(ByteArray(vec)))
+    }
+
+    async fn write_field<W: McWrite>(&self, _w: &mut W) -> McResult<()> {
+        unimplemented!()
+    }
+}

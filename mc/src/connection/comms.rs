@@ -1,13 +1,11 @@
 use crate::field::*;
 use crate::packet::{ClientBound, ClientBoundPacket, PacketBody};
 use crate::prelude::*;
-use async_std::io::ErrorKind;
+use async_std::io::{Cursor, ErrorKind};
 use async_std::sync::{Arc, RwLock};
 use futures::{Sink, SinkExt};
 use openssl::symm::{encrypt, Cipher};
-use std::ops::Deref;
 
-#[async_trait]
 pub trait ResponseSink: Sink<ClientBoundPacket> + Unpin + Send + Sync {}
 
 impl<S: Sink<ClientBoundPacket> + Unpin + Send + Sync> ResponseSink for S {}
@@ -39,12 +37,14 @@ impl<R: ResponseSink> CommsRef<R> {
         }
     }
 
-    pub(crate) async fn send_response<P: ClientBound + Sync + Send>(
+    pub(crate) async fn send_response<P: ClientBound + 'static>(
         &mut self,
         packet: P,
     ) -> McResult<()> {
-        let c = self.serialize_packet(packet).await?;
-        self.response_sink.send(c).await.map_err(|_| McError::Sink)
+        self.response_sink
+            .send(packet.into())
+            .await
+            .map_err(|_| McError::Sink)
     }
 
     pub async fn upgrade(&self, shared_secret: Vec<u8>) {
@@ -58,25 +58,25 @@ impl<R: ResponseSink> CommsRef<R> {
     pub async fn close(&mut self) -> McResult<()> {
         self.response_sink.close().await.map_err(|_| McError::Sink)
     }
+}
 
-    async fn serialize_packet<P: ClientBound + Sync + Send>(
-        &mut self,
-        packet: P,
-    ) -> McResult<ClientBoundPacket> {
-        let enc = self.encryption.read().await;
-        let plaintext = ClientBoundPacket::from(packet);
+impl Encryption {
+    async fn serialize_packet(&self, packet: ClientBoundPacket) -> McResult<Box<[u8]>> {
+        let plaintext = {
+            let mut buf = vec![0u8; packet.full_size()];
+            let mut cursor = Cursor::new(buf.as_mut_slice());
+            packet.write_packet(&mut cursor).await?;
+            buf
+        };
 
-        match enc.deref() {
-            Encryption::Plaintext => Ok(plaintext),
+        match self {
+            Encryption::Plaintext => Ok(plaintext.into_boxed_slice()),
             Encryption::Encrypted {
                 shared_secret,
                 cipher,
-            } => {
-                // TODO use Frame to encrypt a stream instead of double allocing
-                encrypt(*cipher, &shared_secret, Some(&shared_secret), &plaintext)
-                    .map(ClientBoundPacket::from)
-                    .map_err(McError::OpenSSL)
-            }
+            } => encrypt(*cipher, &shared_secret, Some(&shared_secret), &plaintext)
+                .map(Vec::into_boxed_slice)
+                .map_err(McError::OpenSSL),
         }
     }
 }
@@ -98,16 +98,21 @@ impl<S: McStream> ActiveComms<S> {
         (r, w, enc)
     }
 
-    /// Should already be encrypted
     pub async fn send_packet(&mut self, packet: ClientBoundPacket) -> McResult<()> {
         // let enc = self.encryption.read().await;
         // let blob = enc.serialize_packet(packet)?;
-        self.stream.write_all(&packet).await.map_err(McError::Io)
+        // TODO streamify?
+        let enc = self.encryption.read().await;
+        let serialized = enc.serialize_packet(packet).await?;
+        self.stream
+            .write_all(&serialized)
+            .await
+            .map_err(McError::Io)
     }
 
     //noinspection RsUnresolvedReference - idk why read_exact isn't found by the IDE
     pub async fn read_packet(&mut self) -> McResult<PacketBody> {
-        // TODO DECRYPT STREAM
+        // TODO DECRYPT STREAM?!
         let mut length = match VarIntField::read_field(&mut self.stream).await {
             Err(McError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
                 debug!("eof");

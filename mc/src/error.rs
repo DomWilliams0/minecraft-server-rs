@@ -34,6 +34,7 @@ pub enum McError {
     Auth(io::Error),
     BadAuthResponse,
     UnexpectedAuthResponse(u16),
+    NoSuchPlayer(String),
 }
 
 impl Display for McError {

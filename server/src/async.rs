@@ -7,17 +7,17 @@ use log::*;
 
 use async_std::sync::Arc;
 use futures::{pin_mut, select, FutureExt, SinkExt, StreamExt};
+use mc::connection::PostPacketAction;
 use mc::connection::{ActiveComms, CommsRef, ConnectionState};
 use mc::error::{McError, McResult};
-use mc::packet::ClientBoundPacket;
+use mc::game::{ClientMessage, Game};
 use mc::server::ServerData;
 
 type Sender<T> = mpsc::UnboundedSender<T>;
 type Receiver<T> = mpsc::UnboundedReceiver<T>;
 
 async fn handle_client(
-    clientbound_tx: Sender<ClientBoundPacket>,
-    mut clientbound_rx: Receiver<ClientBoundPacket>,
+    mut game_tx: Sender<ClientMessage>,
     stream: io::Result<TcpStream>,
     server_data: Arc<ServerData>,
 ) -> McResult<()> {
@@ -25,6 +25,7 @@ async fn handle_client(
     let peer = stream.peer_addr().map_err(McError::Io)?;
 
     debug!("new client: {:?}", peer);
+    let (clientbound_tx, mut clientbound_rx) = unbounded();
     // broker_tx
     //     .send(BrokerMessage::NewClient { stream: stream.clone(), peer })
     //     .await
@@ -35,7 +36,7 @@ async fn handle_client(
         ActiveComms::new(r, w)
     };
 
-    let comms = CommsRef::new(clientbound_tx, encryption);
+    let comms = CommsRef::new(clientbound_tx.clone(), encryption);
     let mut connection = ConnectionState::new(comms);
 
     loop {
@@ -45,7 +46,7 @@ async fn handle_client(
 
         pin_mut!(serverbound, clientbound);
 
-        if let Err(e) = select! {
+        match select! {
             // recvd a packet from client
             packet = serverbound => {
                 match packet {
@@ -54,17 +55,36 @@ async fn handle_client(
                 }
             },
             // got a packet in outgoing queue to send to client
-            packet = clientbound => writer.send_packet(packet).await,
+            packet = clientbound => writer.send_packet(packet).await.map(|_| PostPacketAction::default()),
         } {
-            drop(serverbound);
-            drop(clientbound);
+            Err(e) => {
+                drop(serverbound);
+                drop(clientbound);
 
-            // flush clientbound queue
-            while let Ok(Some(outgoing)) = clientbound_rx.try_next() {
-                let _ = writer.send_packet(outgoing).await;
+                // flush clientbound queue
+                while let Ok(Some(outgoing)) = clientbound_rx.try_next() {
+                    let _ = writer.send_packet(outgoing).await;
+                }
+
+                break McResult::<()>::Err(e);
             }
 
-            break McResult::<()>::Err(e);
+            Ok(action) => match action {
+                PostPacketAction::None => {}
+                PostPacketAction::EnteredPlayState {
+                    player_name,
+                    player_uuid,
+                } => {
+                    game_tx
+                        .send(ClientMessage::NewClient {
+                            outgoing: clientbound_tx.clone(),
+                            name: player_name,
+                            uuid: player_uuid,
+                        })
+                        .await
+                        .map_err(|_| McError::Sink)?;
+                }
+            },
         }
     }
 }
@@ -77,17 +97,21 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
     // let (broker_tx, broker_rx) = mpsc::unbounded();
     // let _ = task::spawn(run_broker(broker_rx));
 
+    // start game
+    let (game_tx, game_rx) = unbounded();
+
+    let game = Game::new(game_rx);
+    task::spawn(game.run());
+
     // start client loop
     let mut incoming = listener.incoming();
     while let Some(stream) = incoming.next().await {
         // let broker_tx = broker_tx.clone();
         let server_data = server_data.clone();
-        let (clientbound_tx, clientbound_rx) = unbounded();
-
-        // TODO keep clientbound_tx for server
+        let game_tx = game_tx.clone();
 
         let _ = task::spawn(async move {
-            match handle_client(clientbound_tx, clientbound_rx, stream, server_data).await {
+            match handle_client(game_tx, stream, server_data).await {
                 Err(McError::PleaseDisconnect) => debug!("politely closing connection"), // not an error
                 Err(e) => error!("error handling client: {}", e),
                 _ => {}

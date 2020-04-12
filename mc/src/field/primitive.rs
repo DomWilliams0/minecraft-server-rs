@@ -46,6 +46,12 @@ macro_rules! gen_primitive {
             }
         }
 
+        impl From<$int> for $name {
+            fn from(i: $int) -> $name {
+                $name::new(i)
+            }
+        }
+
         #[cfg(test)]
         mod $tests {
             use super::*;
@@ -122,6 +128,12 @@ impl Field for BoolField {
     async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
         let buf = [self.0 as u8];
         w.write_all(&buf).await.map_err(McError::Io)
+    }
+}
+
+impl From<bool> for BoolField {
+    fn from(b: bool) -> Self {
+        Self::new(b)
     }
 }
 

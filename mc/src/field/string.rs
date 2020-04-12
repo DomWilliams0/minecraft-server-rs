@@ -99,3 +99,77 @@ impl Field for ChatField {
         self.string.write_field(w).await
     }
 }
+
+pub struct IdentifierField {
+    string: StringField,
+    colon: Option<usize>,
+}
+
+impl IdentifierField {
+    pub fn new(s: String) -> Self {
+        let colon = s.find(':');
+
+        Self {
+            string: StringField::new(s),
+            colon,
+        }
+    }
+
+    pub fn namespace(&self) -> &str {
+        match self.colon {
+            Some(idx) => &self.string.value[..idx],
+            None => "minecraft",
+        }
+    }
+
+    pub fn location(&self) -> &str {
+        match self.colon {
+            Some(idx) => &self.string.value[idx + 1..],
+            None => &self.string.value,
+        }
+    }
+}
+
+#[async_trait]
+impl Field for IdentifierField {
+    type Displayable = String;
+
+    fn value(&self) -> &Self::Displayable {
+        self.string.value()
+    }
+
+    fn size(&self) -> usize {
+        self.string.size()
+    }
+
+    async fn read_field<R: McRead>(r: &mut R) -> McResult<Self> {
+        StringField::read_field(r)
+            .await
+            .map(|s| Self::new(s.take()))
+    }
+
+    async fn write_field<W: McWrite>(&self, w: &mut W) -> McResult<()> {
+        self.string.write_field(w).await
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::field::string::IdentifierField;
+
+    #[test]
+    fn identifier() {
+        let default = IdentifierField::new("bonbon".to_owned());
+        let custom = IdentifierField::new("colon:sunglass".to_lowercase());
+        let bad = IdentifierField::new("ohno:".to_lowercase());
+
+        assert_eq!(default.namespace(), "minecraft");
+        assert_eq!(default.location(), "bonbon");
+
+        assert_eq!(custom.namespace(), "colon");
+        assert_eq!(custom.location(), "sunglass");
+
+        assert_eq!(bad.namespace(), "ohno");
+        assert_eq!(bad.location(), "");
+    }
+}

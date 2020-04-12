@@ -11,15 +11,20 @@ pub struct PacketBody {
     pub body: Vec<u8>,
 }
 
-pub trait Packet {
-    const ID: PacketId;
+pub trait Packet: Send + Sync {
+    // fn id() -> PacketId;
 }
 
 #[async_trait]
 pub trait ClientBound: Packet {
-    async fn write_packet<W: McWrite>(&self, w: &mut W) -> McResult<()>;
+    async fn write_packet(&self, w: &mut Cursor<&mut [u8]>) -> McResult<()>;
 
-    fn size(&self) -> usize;
+    fn length(&self) -> usize;
+
+    fn full_size(&self) -> usize {
+        let len = VarIntField::new(self.length() as i32);
+        len.value() as usize + len.size()
+    }
 }
 
 #[async_trait]
@@ -29,28 +34,19 @@ pub trait ServerBound: Sized + Packet {
 }
 
 // TODO arena allocator
-pub struct ClientBoundPacket(Box<[u8]>);
+pub struct ClientBoundPacket(Box<dyn ClientBound>);
 
-impl<P: ClientBound> From<P> for ClientBoundPacket {
+impl<P: ClientBound + 'static> From<P> for ClientBoundPacket {
     fn from(packet: P) -> Self {
-        let mut cursor = Cursor::new(vec![]);
-        async_std::task::block_on(packet.write_packet(&mut cursor))
-            .expect("writing packet to cursor should not fail"); // TODO really?
-        Self(cursor.into_inner().into_boxed_slice())
-    }
-}
-
-impl From<Vec<u8>> for ClientBoundPacket {
-    fn from(vec: Vec<u8>) -> Self {
-        Self(vec.into_boxed_slice())
+        Self(Box::new(packet))
     }
 }
 
 impl Deref for ClientBoundPacket {
-    type Target = [u8];
+    type Target = dyn ClientBound;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        self.0.deref()
     }
 }
 
@@ -59,6 +55,7 @@ mod login;
 mod play;
 mod status;
 
+use crate::field::{Field, VarIntField};
 pub use handshake::*;
 pub use login::*;
 pub use play::*;

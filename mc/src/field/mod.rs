@@ -1,12 +1,12 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-pub use array::VarIntThenByteArrayField;
+pub use array::{RestOfPacketByteArrayField, VarIntThenByteArrayField};
 pub use primitive::{
     BoolField, ByteField, DoubleField, FloatField, IntField, LongField, ShortField, UByteField,
     UShortField,
 };
-pub use string::{ChatField, StringField};
+pub use string::{ChatField, IdentifierField, StringField};
 pub use varint::VarIntField;
 
 use crate::prelude::*;

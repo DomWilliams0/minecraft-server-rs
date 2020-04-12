@@ -66,6 +66,20 @@ pub struct ConnectionState<R: ResponseSink> {
     comms: CommsRef<R>, // TODO rename
 }
 
+pub enum PostPacketAction {
+    None,
+    EnteredPlayState {
+        player_name: String,
+        player_uuid: Uuid,
+    },
+}
+
+impl Default for PostPacketAction {
+    fn default() -> Self {
+        PostPacketAction::None
+    }
+}
+
 impl<R: ResponseSink> ConnectionState<R> {
     pub fn new(comms: CommsRef<R>) -> Self {
         Self {
@@ -78,9 +92,10 @@ impl<R: ResponseSink> ConnectionState<R> {
         &mut self,
         packet: PacketBody,
         server_data: &ServerData,
-    ) -> McResult<()> {
+    ) -> McResult<PostPacketAction> {
         let state = std::mem::take(&mut self.state); // TODO is this safe?
 
+        let mut action = PostPacketAction::default();
         self.state = match state {
             ActiveState::Handshake(state) => {
                 state
@@ -93,9 +108,18 @@ impl<R: ResponseSink> ConnectionState<R> {
                     .await
             }
             ActiveState::Login(state) => {
-                state
+                let result = state
                     .handle_transaction(packet, server_data, &mut self.comms)
-                    .await
+                    .await;
+
+                if let Ok(ActiveState::Play(play)) = &result {
+                    action = PostPacketAction::EnteredPlayState {
+                        player_name: play.player_name.clone(),
+                        player_uuid: play.uuid,
+                    };
+                }
+
+                result
             }
             ActiveState::Play(state) => {
                 state
@@ -103,6 +127,6 @@ impl<R: ResponseSink> ConnectionState<R> {
                     .await
             }
         }?;
-        Ok(())
+        Ok(action)
     }
 }

@@ -19,3 +19,21 @@ pub struct JoinGame {
     pub reduced_debug_info: BoolField,
     pub enable_respawn_screen: BoolField,
 }
+
+#[derive(ServerBoundPacket)]
+#[packet_id = 0x05]
+pub struct ClientSettings {
+    pub locale: StringField,
+    pub view_distance: ByteField,
+    pub chat_mode: VarIntField,
+    pub chat_colors: BoolField,
+    pub displayed_skin_parts: UByteField,
+    pub main_hand: VarIntField,
+}
+
+#[derive(ServerBoundPacket)]
+#[packet_id = 0x0B]
+pub struct PluginMessage {
+    pub channel: IdentifierField,
+    pub data: RestOfPacketByteArrayField,
+}
