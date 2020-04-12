@@ -9,8 +9,8 @@ edition = "2018"
 [dependencies]
 mc = {path = "../mc"}
 log = "^0.4"
-env_logger = "^0.7"
+env_logger = "^0.8"
 slab = "^0.4"
 
-async-std = "^1.5"
+async-std = "^1.6"
 futures = "^0.3"

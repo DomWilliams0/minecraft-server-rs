@@ -1,11 +1,9 @@
 use proc_macro::TokenStream;
-use proc_macro2::Ident;
 use proc_macro_error::*;
-use quote::quote;
-use syn::export::ToTokens;
+use quote::{quote, ToTokens};
 use syn::spanned::Spanned;
+use syn::{Ident, Meta, MetaNameValue};
 
-use proc_macro_error::proc_macro2::TokenTree;
 use syn::{Data, DeriveInput, Type};
 
 fn extract_packet_id(item: &DeriveInput) -> i32 {
@@ -13,27 +11,20 @@ fn extract_packet_id(item: &DeriveInput) -> i32 {
     let attribute = item
         .attrs
         .iter()
-        .find(|a| {
-            let ident = a.path.get_ident().map(|i| i.to_string());
-            matches!(ident.as_deref(), Some("packet_id"))
-        })
+        .find(|a| a.path.is_ident("packet_id"))
         .unwrap_or_else(|| abort!(span, "expected packet_id attribute"));
 
-    let literal = attribute
-        .tokens
-        .to_owned()
-        .into_iter()
-        .filter_map(|t| match t {
-            TokenTree::Literal(lit) => Some(lit),
-            _ => None,
-        })
-        .next()
-        .unwrap_or_else(|| abort!(span, "expected literal for packet id"));
-
-    let integer_literal: syn::LitInt =
-        syn::parse2(literal.into_token_stream()).expect("expected integer literal for packet id");
-    let integer: i32 = integer_literal.base10_parse().expect("bad integer");
-    integer
+    let meta = attribute
+        .parse_meta()
+        .unwrap_or_else(|_| abort!(span, "bad syntax"));
+    match meta {
+        Meta::NameValue(MetaNameValue {
+            path,
+            lit: syn::Lit::Int(int),
+            ..
+        }) if path.is_ident("packet_id") => int.base10_parse().expect("bad integer"),
+        _ => abort!(span, "bad packet id"),
+    }
 }
 
 fn extract_fields(item: &DeriveInput) -> (Vec<&Ident>, impl Iterator<Item = &Ident>) {
@@ -56,7 +47,7 @@ fn extract_fields(item: &DeriveInput) -> (Vec<&Ident>, impl Iterator<Item = &Ide
     (field_names, field_types)
 }
 
-fn impl_display(name: &Ident, field_names: &[&Ident]) -> proc_macro2::TokenStream {
+fn impl_display(name: &Ident, field_names: &[&Ident]) -> impl ToTokens {
     let out = quote! {
         impl Display for #name {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

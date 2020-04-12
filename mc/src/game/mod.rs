@@ -1,5 +1,5 @@
 use crate::error::{McError, McResult};
-use crate::field::{StringField, UByteField};
+use crate::field::StringField;
 use crate::packet::{ClientBoundPacket, JoinGame};
 use async_std::sync::Arc;
 use async_std::task;

@@ -43,5 +43,5 @@ impl<R: ResponseSink> State<R> for StatusState {
 }
 
 fn generate_json(description: &str, icon_b64: &str) -> String {
-    format!("{{\"version\": {{\"name\": \"1.15.2\", \"protocol\": 578 }}, \"players\": {{ \"max\": 10, \"online\": 7 }}, \"description\": {{ \"text\": \"{}\" }}, \"favicon\": \"data:image/png;base64,{}\"}}", description, icon_b64)
+    format!("{{\"version\": {{\"name\": \"^1.15\", \"protocol\": 578 }}, \"players\": {{ \"max\": 10, \"online\": 7 }}, \"description\": {{ \"text\": \"{}\" }}, \"favicon\": \"data:image/png;base64,{}\"}}", description, icon_b64)
 }
