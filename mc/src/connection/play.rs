@@ -49,6 +49,19 @@ impl<R: ResponseSink> State<R> for PlayState {
                 );
                 Ok(())
             }
+
+            TeleportConfirm::ID => {
+                let _confirmation = TeleportConfirm::read_packet(packet).await?;
+                // TODO actually check this against the last Player Position And Look packet
+                Ok(())
+            }
+
+            PlayerPositionAndRotation::ID => {
+                let _pos = PlayerPositionAndRotation::read_packet(packet).await?;
+                // TODO actually use
+                Ok(())
+            }
+
             x => Err(McError::BadPacketId(x)),
         }?;
 

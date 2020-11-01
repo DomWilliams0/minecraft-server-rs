@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 
 pub use array::{RestOfPacketByteArrayField, VarIntThenByteArrayField};
+pub use position::PositionField;
 pub use primitive::{
     BoolField, ByteField, DoubleField, FloatField, IntField, LongField, ShortField, UByteField,
     UShortField,
@@ -30,6 +31,7 @@ impl<'a, T: Display> Display for DisplayableField<'a, T> {
 }
 
 mod array;
+mod position;
 mod primitive;
 mod string;
 mod varint;

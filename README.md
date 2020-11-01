@@ -13,8 +13,8 @@ Current supported protocol version is [1.15.2](https://wiki.vg/index.php?title=P
 * [X] Login offline mode
 * [X] Login online mode
 * [X] Join player
-* [ ] Get past "Loading terrain" screen
-	* [ ] Player setup (held item, recipes, player info etc)
+* [.] Get past "Loading terrain" screen
+	* [o] Player setup (held item, recipes, player info etc)
 	* [ ] Chunk data
 	* [ ] Spawn player
 * [ ] Player inventory

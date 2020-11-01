@@ -1,6 +1,8 @@
 use crate::error::{McError, McResult};
 use crate::field::StringField;
-use crate::packet::{ClientBoundPacket, JoinGame};
+use crate::packet::{
+    ClientBoundPacket, HeldItemChange, JoinGame, PlayerPositionAndLook, SpawnPosition,
+};
 use async_std::sync::Arc;
 use async_std::task;
 use chashmap::CHashMap;
@@ -93,8 +95,16 @@ impl Game {
             .map_err(|_| McError::Sink)
     }
 
+    #[allow(unused_variables)]
     async fn on_player_joined(&self, player: &PlayerName) -> McResult<()> {
-        let join_game = JoinGame {
+        macro_rules! send {
+            ($packet:expr) => {
+                self.send_packet_to_client(player, ClientBoundPacket::from($packet))
+                    .await?;
+            };
+        }
+
+        send!(JoinGame {
             entity_id: 123.into(),
             gamemode: 0.into(),
             dimension: 0.into(),
@@ -104,9 +114,16 @@ impl Game {
             view_distance: 20.into(),
             reduced_debug_info: false.into(),
             enable_respawn_screen: true.into(),
-        };
+        });
 
-        self.send_packet_to_client(player, join_game.into()).await?;
+        send!(HeldItemChange { slot: 2.into() });
+
+        send!(SpawnPosition {
+            location: (500, 64, 500).into(),
+        });
+
+        // TODO random or const teleport ID?
+        send!(PlayerPositionAndLook::new((10.0, 100.0, 10.0), 5));
 
         Ok(())
     }
