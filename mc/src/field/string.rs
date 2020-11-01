@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use crate::connection::{McRead, McWrite};
 use crate::error::{McError, McResult};
 use crate::field::{Field, VarIntField};
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug)]
 pub struct StringField {
@@ -127,6 +128,12 @@ impl IdentifierField {
             Some(idx) => &self.string.value[idx + 1..],
             None => &self.string.value,
         }
+    }
+}
+
+impl Debug for IdentifierField {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.namespace(), self.location())
     }
 }
 

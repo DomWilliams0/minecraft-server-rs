@@ -4,6 +4,7 @@ use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerData;
+use async_std::io::Cursor;
 
 // TODO Keep Alive
 // TODO Join Game
@@ -20,21 +21,26 @@ impl<R: ResponseSink> State<R> for PlayState {
     ) -> McResult<ActiveState> {
         match packet.id {
             ClientSettings::ID => {
-                let client_settings = ClientSettings::read_packet(packet).await?;
+                let _client_settings = ClientSettings::read_packet(packet).await?;
                 // whatever
                 Ok(())
             }
 
             PluginMessage::ID => {
                 let plugin_message = PluginMessage::read_packet(packet).await?;
-                let value = match plugin_message.channel.value().as_str() {
-                    "minecraft:brand" => StringField::new(
-                        String::from_utf8(plugin_message.data.value().0.clone())
-                            .unwrap_or_else(|_| "bad value".to_owned()),
-                    )
-                    .take(),
-                    val => val.to_string(),
+
+                let value = match (
+                    plugin_message.channel.namespace(),
+                    plugin_message.channel.location(),
+                ) {
+                    ("minecraft", "brand") => {
+                        let mut cursor = Cursor::new(&plugin_message.data.value().0);
+                        let string = StringField::read_field(&mut cursor).await?;
+                        string.take()
+                    }
+                    _ => "unknown".to_owned(),
                 };
+
                 debug!(
                     "got plugin message: namespace={}, location={}, value={}",
                     plugin_message.channel.namespace(),
