@@ -21,7 +21,8 @@ struct Client {
 
 impl Client {}
 
-pub type PlayerName = String;
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct PlayerName(String);
 
 pub struct Game {
     clients: Arc<CHashMap<PlayerName, Client>>,
@@ -30,7 +31,7 @@ pub struct Game {
 
 pub enum ClientMessage {
     NewClient {
-        name: PlayerName,
+        name: String,
         uuid: Uuid,
         outgoing: UnboundedSender<ClientBoundPacket>,
     },
@@ -56,6 +57,7 @@ impl Game {
                             outgoing,
                         } => {
                             info!("adding player {} to the game", name);
+                            let name = PlayerName(name);
                             self.clients.insert(name.clone(), Client { outgoing, uuid });
 
                             if let Err(e) = self.on_player_joined(&name).await {
@@ -83,7 +85,7 @@ impl Game {
         let mut client = self
             .clients
             .get_mut(name)
-            .ok_or_else(|| McError::NoSuchPlayer(name.clone()))?;
+            .ok_or_else(|| McError::NoSuchPlayer(name.0.clone()))?;
         client
             .outgoing
             .send(packet)
