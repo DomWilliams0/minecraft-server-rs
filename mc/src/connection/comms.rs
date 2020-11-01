@@ -44,7 +44,7 @@ impl<R: ResponseSink> CommsRef<R> {
         self.response_sink
             .send(packet.into())
             .await
-            .map_err(|_| McError::Sink)
+            .map_err(|_| McError::SinkUnknown)
     }
 
     pub async fn upgrade(&self, shared_secret: Vec<u8>) {
@@ -56,7 +56,10 @@ impl<R: ResponseSink> CommsRef<R> {
     }
 
     pub async fn close(&mut self) -> McResult<()> {
-        self.response_sink.close().await.map_err(|_| McError::Sink)
+        self.response_sink
+            .close()
+            .await
+            .map_err(|_| McError::SinkUnknown)
     }
 }
 

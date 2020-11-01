@@ -121,7 +121,7 @@ impl Field for BoolField {
         match buf[0] {
             0 => Ok(Self(false)),
             1 => Ok(Self(true)),
-            _ => Err(McError::BadBool),
+            i => Err(McError::BadBool(i)),
         }
     }
 

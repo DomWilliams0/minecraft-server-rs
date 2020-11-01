@@ -81,8 +81,7 @@ async fn handle_client(
                             name: player_name,
                             uuid: player_uuid,
                         })
-                        .await
-                        .map_err(|_| McError::Sink)?;
+                        .await?;
                 }
             },
         }

@@ -50,7 +50,7 @@ impl Field for StringField {
         let value = {
             let mut vec = vec![0u8; length];
             r.read_exact(&mut vec).await.map_err(McError::Io)?;
-            String::from_utf8(vec).map_err(|_| McError::BadString)?
+            String::from_utf8(vec)?
         };
 
         Ok(Self::new(value))

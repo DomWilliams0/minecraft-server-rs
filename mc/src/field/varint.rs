@@ -44,7 +44,7 @@ impl Field for VarIntField {
         }
 
         if n > 5 {
-            Err(McError::BadVarInt)
+            Err(McError::BadVarInt(n))
         } else {
             let value = unsafe { std::mem::transmute(out) };
             Ok(Self {

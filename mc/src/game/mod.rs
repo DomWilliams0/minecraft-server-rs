@@ -88,11 +88,9 @@ impl Game {
             .clients
             .get_mut(name)
             .ok_or_else(|| McError::NoSuchPlayer(name.0.clone()))?;
-        client
-            .outgoing
-            .send(packet)
-            .await
-            .map_err(|_| McError::Sink)
+
+        client.outgoing.send(packet).await?;
+        Ok(())
     }
 
     #[allow(unused_variables)]
