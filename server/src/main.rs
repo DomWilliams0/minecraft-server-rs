@@ -1,7 +1,6 @@
 use log::LevelFilter;
 
-mod r#async;
-// mod sync;
+mod server;
 
 fn main() {
     env_logger::builder()
@@ -10,5 +9,5 @@ fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    r#async::main();
+    server::main();
 }
