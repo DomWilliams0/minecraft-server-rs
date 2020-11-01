@@ -37,3 +37,10 @@ pub struct PluginMessage {
     pub channel: IdentifierField,
     pub data: RestOfPacketByteArrayField,
 }
+
+#[derive(ClientBoundPacket)]
+#[packet_id = 0x1B]
+pub struct Disconnect {
+    pub reason: ChatField,
+}
+

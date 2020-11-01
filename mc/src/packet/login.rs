@@ -15,7 +15,7 @@ pub struct LoginStart {
 
 #[derive(ClientBoundPacket)]
 #[packet_id = 0x00]
-pub struct Disconnect {
+pub struct DisconnectLogin {
     pub reason: ChatField,
 }
 
