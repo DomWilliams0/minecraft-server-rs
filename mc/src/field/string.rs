@@ -71,6 +71,7 @@ pub struct ChatField {
 }
 
 impl ChatField {
+    // TODO pass in fmt args somehow to avoid double allocation
     pub fn new(value: String) -> Self {
         Self {
             string: StringField::new(format!(r#"{{"text": "{}"}}"#, value)),
