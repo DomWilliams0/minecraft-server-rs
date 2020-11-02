@@ -1,16 +1,13 @@
 use crate::connection::comms::{CommsRef, ResponseSink};
-use crate::connection::{ActiveState, State, StatusState};
+use crate::connection::{ActiveState, StatusState};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
-use crate::server::ServerData;
 
-#[async_trait]
-impl<R: ResponseSink> State<R> for StatusState {
-    async fn handle_transaction(
+impl StatusState {
+    pub async fn handle_transaction<R: ResponseSink>(
         self,
         packet: PacketBody,
-        _server_data: &ServerData,
         comms: &mut CommsRef<R>,
     ) -> McResult<ActiveState> {
         match packet.id {

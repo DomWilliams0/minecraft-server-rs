@@ -1,7 +1,6 @@
 use async_std::io::{self};
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
-use futures::channel::mpsc;
 use futures::channel::mpsc::unbounded;
 use log::*;
 
@@ -10,14 +9,11 @@ use futures::{pin_mut, select, FutureExt, SinkExt, StreamExt};
 use mc::connection::PostPacketAction;
 use mc::connection::{ActiveComms, CommsRef, ConnectionState};
 use mc::error::{McError, McResult};
-use mc::game::{ClientMessage, Game};
+use mc::game::{ClientMessage, ClientMessageSender, Game};
 use mc::server::ServerData;
 
-type Sender<T> = mpsc::UnboundedSender<T>;
-type Receiver<T> = mpsc::UnboundedReceiver<T>;
-
 async fn handle_client(
-    mut game_tx: Sender<ClientMessage>,
+    mut game_tx: ClientMessageSender,
     stream: io::Result<TcpStream>,
     server_data: Arc<ServerData>,
 ) -> McResult<()> {
@@ -26,10 +22,6 @@ async fn handle_client(
 
     debug!("new client: {:?}", peer);
     let (clientbound_tx, mut clientbound_rx) = unbounded();
-    // broker_tx
-    //     .send(BrokerMessage::NewClient { stream: stream.clone(), peer })
-    //     .await
-    //     .map_err(McError::IoChannel)?;
 
     let (mut reader, mut writer, encryption) = {
         let (r, w) = (stream.clone(), stream);
@@ -51,7 +43,7 @@ async fn handle_client(
             packet = serverbound => {
                 match packet {
                     Err(e) => break Err(e),
-                    Ok(packet) => connection.handle_packet(packet, &server_data).await,
+                    Ok(packet) => connection.handle_packet(packet, &server_data, &mut game_tx).await,
                 }
             },
             // got a packet in outgoing queue to send to client
@@ -76,11 +68,13 @@ async fn handle_client(
                     player_uuid,
                 } => {
                     game_tx
-                        .send(ClientMessage::NewClient {
-                            outgoing: clientbound_tx.clone(),
-                            name: player_name,
-                            uuid: player_uuid,
-                        })
+                        .send((
+                            player_uuid,
+                            ClientMessage::NewClient {
+                                outgoing: clientbound_tx.clone(),
+                                name: player_name,
+                            },
+                        ))
                         .await?;
                 }
             },
@@ -92,11 +86,7 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
     let listener = TcpListener::bind((host, port)).await.map_err(McError::Io)?;
     info!("listening on {}:{}", host, port);
 
-    // start broker task
-    // let (broker_tx, broker_rx) = mpsc::unbounded();
-    // let _ = task::spawn(run_broker(broker_rx));
-
-    // start game
+    // start game broker
     let (game_tx, game_rx) = unbounded();
 
     let game = Game::new(game_rx);
@@ -105,7 +95,6 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
     // start client loop
     let mut incoming = listener.incoming();
     while let Some(stream) = incoming.next().await {
-        // let broker_tx = broker_tx.clone();
         let server_data = server_data.clone();
         let game_tx = game_tx.clone();
 
@@ -119,24 +108,6 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
     }
 
     Ok(())
-}
-
-enum BrokerMessage {}
-
-async fn run_broker(broker_rx: Receiver<BrokerMessage>) {
-    // TODO broker will only access outgoing client queue, NOT the socket
-    // let mut clients: Slab<Arc<TcpStream>> = Slab::with_capacity(16);
-    /*
-    let mut clients: HashMap<SocketAddr, Arc<TcpStream>> = HashMap::with_capacity(16);
-
-    while let Some(msg) = broker_rx.next().await {
-        match msg {
-            BrokerMessage::NewClient { stream, peer } => {
-                clients.insert(peer, stream);
-            }
-        }
-    }
-    */
 }
 
 pub fn main() {

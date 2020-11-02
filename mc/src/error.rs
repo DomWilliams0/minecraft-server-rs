@@ -5,6 +5,8 @@ use crate::packet::PacketId;
 use futures::channel::mpsc::SendError;
 use std::string::FromUtf8Error;
 
+use crate::game::ClientUuid;
+
 pub type McResult<T> = Result<T, McError>;
 
 // TODO simplify map_err
@@ -66,6 +68,9 @@ pub enum McError {
     #[error("Unexpected {0} response from Mojang during authentication")]
     UnexpectedAuthResponse(u16),
 
-    #[error("No such player {0:?}")]
-    NoSuchPlayer(String),
+    #[error("No such player with UUID {0:?}")]
+    NoSuchPlayer(ClientUuid),
+
+    #[error("Incorrect teleport confirmation, expected {expected:?} but got {actual}")]
+    IncorrectTeleportConfirm { expected: Option<i32>, actual: i32 },
 }

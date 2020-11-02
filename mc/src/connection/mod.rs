@@ -1,9 +1,8 @@
-use uuid::Uuid;
-
 pub use comms::{ActiveComms, CommsRef};
 
 use crate::connection::comms::ResponseSink;
-use crate::field::ChatField;
+
+use crate::game::{ClientMessageSender, ClientUuid};
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerData;
@@ -22,16 +21,6 @@ impl<T: Read + Unpin + Send> McRead for T {}
 impl<T: Write + Unpin + Send> McWrite for T {}
 impl<T: McRead + McWrite> McStream for T {}
 
-#[async_trait]
-trait State<R: ResponseSink> {
-    async fn handle_transaction(
-        self,
-        packet: PacketBody,
-        server_data: &ServerData,
-        response_sink: &mut CommsRef<R>,
-    ) -> McResult<ActiveState>;
-}
-
 #[derive(Default)]
 struct HandshakeState;
 
@@ -46,7 +35,7 @@ struct LoginState {
 
 struct PlayState {
     pub player_name: String,
-    pub uuid: Uuid,
+    pub uuid: ClientUuid,
 }
 
 enum ActiveState {
@@ -71,7 +60,7 @@ pub enum PostPacketAction {
     None,
     EnteredPlayState {
         player_name: String,
-        player_uuid: Uuid,
+        player_uuid: ClientUuid,
     },
 }
 
@@ -93,21 +82,14 @@ impl<R: ResponseSink> ConnectionState<R> {
         &mut self,
         packet: PacketBody,
         server_data: &ServerData,
+        game_broker: &mut ClientMessageSender,
     ) -> McResult<PostPacketAction> {
         let state = std::mem::take(&mut self.state); // TODO is this safe?
 
         let mut action = PostPacketAction::default();
         let result = match state {
-            ActiveState::Handshake(state) => {
-                state
-                    .handle_transaction(packet, server_data, &mut self.comms)
-                    .await
-            }
-            ActiveState::Status(state) => {
-                state
-                    .handle_transaction(packet, server_data, &mut self.comms)
-                    .await
-            }
+            ActiveState::Handshake(state) => state.handle_transaction(packet).await,
+            ActiveState::Status(state) => state.handle_transaction(packet, &mut self.comms).await,
             ActiveState::Login(state) => {
                 let result = state
                     .handle_transaction(packet, server_data, &mut self.comms)
@@ -122,24 +104,13 @@ impl<R: ResponseSink> ConnectionState<R> {
 
                 result
             }
-            ActiveState::Play(state) => {
-                state
-                    .handle_transaction(packet, server_data, &mut self.comms)
-                    .await
-            }
+            ActiveState::Play(state) => state.handle_transaction(packet, game_broker).await,
         };
 
         match result {
             Err(err) => {
-                let _kick = self
-                    .comms
-                    .send_response(Disconnect {
-                        reason: ChatField::new(format!(
-                            "§cSHIT, AN ERROR OCCURRED!\n§fpls don't panic\n\n§7{}",
-                            err
-                        )),
-                    })
-                    .await;
+                // ignore kick error
+                let _kick = self.comms.send_response(Disconnect::with_error(&err)).await;
 
                 return Err(err);
             }

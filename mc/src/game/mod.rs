@@ -1,46 +1,49 @@
 use crate::error::{McError, McResult};
 use crate::field::StringField;
 use crate::packet::{
-    ClientBoundPacket, HeldItemChange, JoinGame, PlayerPositionAndLook, SpawnPosition,
+    ClientBoundPacket, Disconnect, HeldItemChange, JoinGame, PlayerPositionAndLook, SpawnPosition,
 };
 use async_std::sync::Arc;
 use async_std::task;
 use chashmap::CHashMap;
-use futures::{
-    channel::mpsc::{UnboundedReceiver, UnboundedSender},
-    SinkExt, StreamExt,
-};
+use futures::{channel::mpsc::UnboundedSender, SinkExt, StreamExt};
 use log::*;
-use uuid::Uuid;
 
 // TODO generic sinks
 
+mod message;
+
+pub use message::{ClientMessage, ClientMessageReceiver, ClientMessageSender, ClientUuid};
+
 struct Client {
-    // incoming: UnboundedReceiver<>
     outgoing: UnboundedSender<ClientBoundPacket>,
-    uuid: Uuid,
+    name: PlayerName,
+
+    // TODO uuid to name lookup
+    /// Teleport ID sent to client that should be verified with a TeleportConfirm
+    next_teleport_id: Option<i32>,
 }
 
-impl Client {}
+impl Client {
+    fn new(outgoing: UnboundedSender<ClientBoundPacket>, name: PlayerName) -> Self {
+        Client {
+            outgoing,
+            name,
+            next_teleport_id: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct PlayerName(String);
 
 pub struct Game {
-    clients: Arc<CHashMap<PlayerName, Client>>,
-    clients_rx: UnboundedReceiver<ClientMessage>,
-}
-
-pub enum ClientMessage {
-    NewClient {
-        name: String,
-        uuid: Uuid,
-        outgoing: UnboundedSender<ClientBoundPacket>,
-    },
+    clients: Arc<CHashMap<ClientUuid, Client>>,
+    clients_rx: ClientMessageReceiver,
 }
 
 impl Game {
-    pub fn new(clients_rx: UnboundedReceiver<ClientMessage>) -> Self {
+    pub fn new(clients_rx: ClientMessageReceiver) -> Self {
         Self {
             clients: Arc::new(CHashMap::with_capacity(64)),
             clients_rx,
@@ -51,53 +54,100 @@ impl Game {
         // client message loop
         task::spawn(async move {
             loop {
-                if let Some(msg) = self.clients_rx.next().await {
-                    match msg {
-                        ClientMessage::NewClient {
-                            name,
-                            uuid,
-                            outgoing,
-                        } => {
-                            info!("adding player {} to the game", name);
-                            let name = PlayerName(name);
-                            self.clients.insert(name.clone(), Client { outgoing, uuid });
+                let result;
 
-                            if let Err(e) = self.on_player_joined(&name).await {
-                                error!("error adding player to the game: {}", e);
-                                // TODO kick?
-                            }
+                if let Some((uuid, msg)) = self.clients_rx.next().await {
+                    match msg {
+                        ClientMessage::NewClient { name, outgoing } => {
+                            info!("adding player {} to the game", name);
+                            self.clients
+                                .insert(uuid, Client::new(outgoing, PlayerName(name)));
+
+                            result = self.on_player_joined(uuid).await.map_err(|err| {
+                                error!("failed to join player");
+                                err
+                            });
                         }
+                        ClientMessage::VerifyTeleport(id) => {
+                            result = self.check_teleport_id(uuid, id);
+                        }
+                    }
+
+                    if let Err(err) = result {
+                        warn!(
+                            "error handling message for client, kicking {} with '{}'",
+                            self.client(uuid)
+                                .map(|c| c.name.0.clone()) // clone alright in exceptional case
+                                .unwrap_or_else(|_| format!("player {:?}", uuid)),
+                            err
+                        );
+
+                        self.kick_with_error(uuid, err).await;
                     }
                 }
             }
         });
-        //
-        // loop{
-        //     task::sleep(Duration::from_secs(1_000_000_000)).await;
-        // }
 
         Ok(())
+    }
+
+    fn client_mut(&self, uuid: ClientUuid) -> McResult<chashmap::WriteGuard<ClientUuid, Client>> {
+        self.clients
+            .get_mut(&uuid)
+            .ok_or_else(|| McError::NoSuchPlayer(uuid))
+    }
+
+    fn client(&self, uuid: ClientUuid) -> McResult<chashmap::ReadGuard<ClientUuid, Client>> {
+        self.clients
+            .get(&uuid)
+            .ok_or_else(|| McError::NoSuchPlayer(uuid))
+    }
+
+    async fn kick_with_error(&self, uuid: ClientUuid, error: McError) {
+        if let Err(kick_error) = self
+            .send_packet_to_client(uuid, Disconnect::with_error(&error).into())
+            .await
+        {
+            error!(
+                "failed to kick with existing error {}: {}",
+                error, kick_error
+            )
+        }
     }
 
     async fn send_packet_to_client(
         &self,
-        name: &PlayerName,
+        uuid: ClientUuid,
         packet: ClientBoundPacket,
     ) -> McResult<()> {
-        let mut client = self
-            .clients
-            .get_mut(name)
-            .ok_or_else(|| McError::NoSuchPlayer(name.0.clone()))?;
-
+        let mut client = self.client_mut(uuid)?;
         client.outgoing.send(packet).await?;
         Ok(())
     }
 
+    fn set_teleport_id(&self, uuid: ClientUuid, teleport_id: i32) -> McResult<()> {
+        self.client_mut(uuid)?.next_teleport_id = Some(teleport_id);
+        Ok(())
+    }
+
+    fn check_teleport_id(&self, uuid: ClientUuid, confirmed_teleport_id: i32) -> McResult<()> {
+        let true_value = self.client_mut(uuid)?.next_teleport_id.take();
+        if true_value == Some(confirmed_teleport_id) {
+            Ok(())
+        } else {
+            Err(McError::IncorrectTeleportConfirm {
+                expected: true_value,
+                actual: confirmed_teleport_id,
+            })
+        }
+    }
+
     #[allow(unused_variables)]
-    async fn on_player_joined(&self, player: &PlayerName) -> McResult<()> {
+    async fn on_player_joined(&self, uuid: ClientUuid) -> McResult<()> {
+        // TODO take the client lock just once
         macro_rules! send {
             ($packet:expr) => {
-                self.send_packet_to_client(player, ClientBoundPacket::from($packet))
+                self.send_packet_to_client(uuid, ClientBoundPacket::from($packet))
                     .await?;
             };
         }
@@ -120,8 +170,9 @@ impl Game {
             location: (500, 64, 500).into(),
         });
 
-        // TODO random or const teleport ID?
-        send!(PlayerPositionAndLook::new((10.0, 100.0, 10.0), 5));
+        let teleport_id = 1234;
+        send!(PlayerPositionAndLook::new((10.0, 100.0, 10.0), teleport_id));
+        self.set_teleport_id(uuid, teleport_id)?;
 
         Ok(())
     }

@@ -97,3 +97,14 @@ impl PlayerPositionAndLook {
         }
     }
 }
+
+impl Disconnect {
+    pub fn with_error(error: &McError) -> Self {
+        Disconnect {
+            reason: ChatField::new(format!(
+                "§cSHIT, AN ERROR OCCURRED!\n§fpls don't panic\n\n§7{}",
+                error
+            )),
+        }
+    }
+}

@@ -4,7 +4,7 @@ use uuid::adapter::HyphenatedRef;
 use uuid::Uuid;
 
 use crate::connection::comms::{CommsRef, ResponseSink};
-use crate::connection::{ActiveState, LoginState, PlayState, State};
+use crate::connection::{ActiveState, LoginState, PlayState};
 use crate::field::*;
 use crate::packet::*;
 use crate::prelude::*;
@@ -18,9 +18,8 @@ fn generate_verify_token() -> McResult<Vec<u8>> {
 
 const SERVER_ID: &str = "";
 
-#[async_trait]
-impl<R: ResponseSink> State<R> for LoginState {
-    async fn handle_transaction(
+impl LoginState {
+    pub async fn handle_transaction<R: ResponseSink>(
         mut self,
         packet: PacketBody,
         server_data: &ServerData,
@@ -147,7 +146,7 @@ impl LoginState {
 
         let state = PlayState {
             player_name,
-            uuid: player_uuid,
+            uuid: player_uuid.into(),
         };
 
         Ok((response, state))
