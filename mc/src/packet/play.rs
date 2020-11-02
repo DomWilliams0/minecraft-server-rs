@@ -84,6 +84,18 @@ pub struct Disconnect {
     pub reason: ChatField,
 }
 
+#[derive(ClientBoundPacket)]
+#[packet_id = 0x21]
+pub struct KeepAlive {
+    pub keep_alive_id: LongField,
+}
+
+#[derive(ServerBoundPacket)]
+#[packet_id = 0x0F]
+pub struct KeepAliveResponse {
+    pub keep_alive_id: LongField,
+}
+
 impl PlayerPositionAndLook {
     pub fn new(pos: (f64, f64, f64), teleport_id: i32) -> Self {
         PlayerPositionAndLook {
@@ -111,6 +123,15 @@ impl Disconnect {
 
         Disconnect {
             reason: ChatField::new(msg),
+        }
+    }
+}
+
+impl KeepAlive {
+    pub fn generate() -> Self {
+        let random = 4; // good enough
+        KeepAlive {
+            keep_alive_id: random.into(),
         }
     }
 }

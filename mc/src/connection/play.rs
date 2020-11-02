@@ -66,6 +66,18 @@ impl PlayState {
                 Ok(())
             }
 
+            KeepAliveResponse::ID => {
+                let keep_alive = KeepAliveResponse::read_packet(packet).await?;
+                game_broker
+                    .send((
+                        self.uuid,
+                        ClientMessage::VerifyKeepAlive(*keep_alive.keep_alive_id.value()),
+                    ))
+                    .await?;
+
+                Ok(())
+            }
+
             x => Err(McError::BadPacketId(x)),
         }?;
 

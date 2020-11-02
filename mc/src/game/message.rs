@@ -16,6 +16,8 @@ pub enum ClientMessage {
 
     /// Notification that player has disconnected
     PlayerDisconnected,
+
+    VerifyKeepAlive(i64),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

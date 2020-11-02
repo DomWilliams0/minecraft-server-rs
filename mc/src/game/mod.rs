@@ -1,7 +1,8 @@
 use crate::error::{McError, McResult};
 use crate::field::StringField;
 use crate::packet::{
-    ClientBoundPacket, Disconnect, HeldItemChange, JoinGame, PlayerPositionAndLook, SpawnPosition,
+    ClientBoundPacket, Disconnect, HeldItemChange, JoinGame, KeepAlive, PlayerPositionAndLook,
+    SpawnPosition,
 };
 use async_std::sync::Arc;
 use async_std::task;
@@ -13,8 +14,10 @@ use log::*;
 
 mod message;
 
+use async_std::task::JoinHandle;
 pub use message::{ClientMessage, ClientMessageReceiver, ClientMessageSender, ClientUuid};
 use std::hint::unreachable_unchecked;
+use std::time::Duration;
 
 struct Client {
     outgoing: UnboundedSender<ClientBoundPacket>,
@@ -23,6 +26,8 @@ struct Client {
     // TODO uuid to name lookup
     /// Teleport ID sent to client that should be verified with a TeleportConfirm
     next_teleport_id: Option<i32>,
+
+    keep_alive: JoinHandle<()>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -53,14 +58,7 @@ impl Game {
                         let new_client = std::mem::replace(&mut msg, ClientMessage::PlayerJoined);
                         match new_client {
                             ClientMessage::NewClient { name, outgoing } => {
-                                let count = self.clients.len();
-                                info!(
-                                    "adding player {} to the game, now has {} players",
-                                    name,
-                                    count + 1
-                                );
-                                self.clients
-                                    .insert(uuid, Client::new(outgoing, PlayerName(name)));
+                                self.add_player(uuid, name, outgoing).await;
                             }
                             _ => unsafe {
                                 // just checked
@@ -70,16 +68,7 @@ impl Game {
                     }
                     // special case where client is removed with no further processing
                     else if let ClientMessage::PlayerDisconnected = &msg {
-                        match self.clients.remove(&uuid) {
-                            Some(client) => {
-                                let count = self.clients.len();
-                                info!(
-                                    "removed player {} from the game, now has {} players",
-                                    client.name.0, count
-                                );
-                            }
-                            None => warn!("player {:?} disconnected but was not joined", uuid),
-                        };
+                        self.remove_player(uuid).await;
 
                         // nothing else to do
                         continue;
@@ -108,6 +97,58 @@ impl Game {
         Ok(())
     }
 
+    async fn add_player(
+        &mut self,
+        uuid: ClientUuid,
+        name: String,
+        outgoing: UnboundedSender<ClientBoundPacket>,
+    ) {
+        // spawn keep-alive task
+        let mut keep_alive_tx = outgoing.clone();
+        let keep_alive = task::spawn(async move {
+            loop {
+                task::sleep(Duration::from_secs(1)).await;
+
+                if let Err(err) = keep_alive_tx.send(KeepAlive::generate().into()).await {
+                    warn!("failed to send keep-alive: {}", err);
+                    break;
+                }
+            }
+        });
+
+        // add to clients map
+        let count = self.clients.len();
+        info!(
+            "adding player {} to the game, now has {} players",
+            name,
+            count + 1
+        );
+
+        let client = Client {
+            outgoing,
+            name: PlayerName(name),
+            keep_alive,
+            next_teleport_id: None,
+        };
+        self.clients.insert(uuid, client);
+    }
+
+    async fn remove_player(&mut self, uuid: ClientUuid) {
+        match self.clients.remove(&uuid) {
+            Some(client) => {
+                let count = self.clients.len();
+                info!(
+                    "removed player {} from the game, now has {} players",
+                    client.name.0, count
+                );
+
+                // stop keep-alive task
+                let _ = client.keep_alive.cancel().await;
+            }
+            None => warn!("player {:?} disconnected but was not joined", uuid),
+        };
+    }
+
     async fn handle_message(
         &self,
         mut client: WriteGuard<'_, ClientUuid, Client>,
@@ -123,6 +164,14 @@ impl Game {
                 err
             }),
             VerifyTeleport(id) => client.check_teleport_id(id),
+            VerifyKeepAlive(keep_alive) => {
+                // TODO check keep alive value properly
+                if keep_alive == 4 {
+                    Ok(())
+                } else {
+                    Err(McError::IncorrectKeepAlive(keep_alive))
+                }
+            }
         }
     }
 
@@ -140,14 +189,6 @@ impl Game {
 }
 
 impl Client {
-    fn new(outgoing: UnboundedSender<ClientBoundPacket>, name: PlayerName) -> Self {
-        Client {
-            outgoing,
-            name,
-            next_teleport_id: None,
-        }
-    }
-
     async fn kick_with_error(&mut self, error: McError) {
         // TODO not if politely disconnect
         if let Err(kick_error) = self

@@ -73,4 +73,7 @@ pub enum McError {
 
     #[error("Incorrect teleport confirmation, expected {expected:?} but got {actual}")]
     IncorrectTeleportConfirm { expected: Option<i32>, actual: i32 },
+
+    #[error("Incorrect keep-alive response, expected 4 but got {0}")]
+    IncorrectKeepAlive(i64),
 }
