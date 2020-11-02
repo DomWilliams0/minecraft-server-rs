@@ -8,6 +8,8 @@ pub enum ClientMessage {
         outgoing: UnboundedSender<ClientBoundPacket>,
     },
 
+    PlayerJoined,
+
     VerifyTeleport(i32),
 }
 
