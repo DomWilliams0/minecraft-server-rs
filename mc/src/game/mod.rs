@@ -53,7 +53,12 @@ impl Game {
                         let new_client = std::mem::replace(&mut msg, ClientMessage::PlayerJoined);
                         match new_client {
                             ClientMessage::NewClient { name, outgoing } => {
-                                info!("adding player {} to the game", name);
+                                let count = self.clients.len();
+                                info!(
+                                    "adding player {} to the game, now has {} players",
+                                    name,
+                                    count + 1
+                                );
                                 self.clients
                                     .insert(uuid, Client::new(outgoing, PlayerName(name)));
                             }
@@ -62,6 +67,22 @@ impl Game {
                                 unreachable_unchecked()
                             },
                         };
+                    }
+                    // special case where client is removed with no further processing
+                    else if let ClientMessage::PlayerDisconnected = &msg {
+                        match self.clients.remove(&uuid) {
+                            Some(client) => {
+                                let count = self.clients.len();
+                                info!(
+                                    "removed player {} from the game, now has {} players",
+                                    client.name.0, count
+                                );
+                            }
+                            None => warn!("player {:?} disconnected but was not joined", uuid),
+                        };
+
+                        // nothing else to do
+                        continue;
                     }
 
                     let result = match self.client_mut(uuid) {
@@ -92,14 +113,16 @@ impl Game {
         mut client: WriteGuard<'_, ClientUuid, Client>,
         msg: ClientMessage,
     ) -> McResult<()> {
-        match msg {
-            ClientMessage::NewClient { .. } => unreachable!(),
+        use ClientMessage::*;
 
-            ClientMessage::PlayerJoined => client.on_player_joined().await.map_err(|err| {
+        match msg {
+            NewClient { .. } | PlayerDisconnected => unreachable!(),
+
+            PlayerJoined => client.on_player_joined().await.map_err(|err| {
                 error!("failed to join player");
                 err
             }),
-            ClientMessage::VerifyTeleport(id) => client.check_teleport_id(id),
+            VerifyTeleport(id) => client.check_teleport_id(id),
         }
     }
 
@@ -109,11 +132,11 @@ impl Game {
             .ok_or_else(|| McError::NoSuchPlayer(uuid))
     }
 
-    fn client(&self, uuid: ClientUuid) -> McResult<chashmap::ReadGuard<ClientUuid, Client>> {
-        self.clients
-            .get(&uuid)
-            .ok_or_else(|| McError::NoSuchPlayer(uuid))
-    }
+    // fn client(&self, uuid: ClientUuid) -> McResult<chashmap::ReadGuard<ClientUuid, Client>> {
+    //     self.clients
+    //         .get(&uuid)
+    //         .ok_or_else(|| McError::NoSuchPlayer(uuid))
+    // }
 }
 
 impl Client {
@@ -126,6 +149,7 @@ impl Client {
     }
 
     async fn kick_with_error(&mut self, error: McError) {
+        // TODO not if politely disconnect
         if let Err(kick_error) = self
             .send_packet(Disconnect::with_error(&error).into())
             .await

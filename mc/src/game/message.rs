@@ -8,9 +8,14 @@ pub enum ClientMessage {
         outgoing: UnboundedSender<ClientBoundPacket>,
     },
 
+    /// Body-less variant of NewClient
     PlayerJoined,
 
+    /// TeleportConfirm
     VerifyTeleport(i32),
+
+    /// Notification that player has disconnected
+    PlayerDisconnected,
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]

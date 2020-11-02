@@ -2,10 +2,11 @@ pub use comms::{ActiveComms, CommsRef};
 
 use crate::connection::comms::ResponseSink;
 
-use crate::game::{ClientMessageSender, ClientUuid};
+use crate::game::{ClientMessage, ClientMessageSender, ClientUuid};
 use crate::packet::*;
 use crate::prelude::*;
 use crate::server::ServerData;
+use futures::SinkExt;
 
 mod comms;
 mod handshake;
@@ -54,6 +55,9 @@ impl Default for ActiveState {
 pub struct ConnectionState<R: ResponseSink> {
     state: ActiveState,
     comms: CommsRef<R>, // TODO rename
+
+    /// Once assigned a UUID in PlayState, don't forget it for disconnection
+    play_uuid: Option<ClientUuid>,
 }
 
 pub enum PostPacketAction {
@@ -75,6 +79,7 @@ impl<R: ResponseSink> ConnectionState<R> {
         Self {
             state: ActiveState::default(),
             comms,
+            play_uuid: None,
         }
     }
 
@@ -96,6 +101,7 @@ impl<R: ResponseSink> ConnectionState<R> {
                     .await;
 
                 if let Ok(ActiveState::Play(play)) = &result {
+                    self.play_uuid = Some(play.uuid);
                     action = PostPacketAction::EnteredPlayState {
                         player_name: play.player_name.clone(),
                         player_uuid: play.uuid,
@@ -120,5 +126,16 @@ impl<R: ResponseSink> ConnectionState<R> {
         };
 
         Ok(action)
+    }
+
+    pub async fn on_disconnect(&mut self, game_broker: &mut ClientMessageSender) -> McResult<()> {
+        if let Some(uuid) = self.play_uuid.take() {
+            // game must be notified if the player has joined
+            game_broker
+                .send((uuid, ClientMessage::PlayerDisconnected))
+                .await?;
+        }
+
+        Ok(())
     }
 }

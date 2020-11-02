@@ -42,7 +42,10 @@ async fn handle_client(
             // recvd a packet from client
             packet = serverbound => {
                 match packet {
-                    Err(e) => break Err(e),
+                    Err(e) => {
+                        let _ = connection.on_disconnect(&mut game_tx).await;
+                        break Err(e);
+                    }
                     Ok(packet) => connection.handle_packet(packet, &server_data, &mut game_tx).await,
                 }
             },
@@ -52,6 +55,8 @@ async fn handle_client(
             Err(e) => {
                 drop(serverbound);
                 drop(clientbound);
+
+                let _ = connection.on_disconnect(&mut game_tx).await;
 
                 // flush clientbound queue
                 while let Ok(Some(outgoing)) = clientbound_rx.try_next() {
@@ -99,10 +104,12 @@ async fn accept_clients(host: &str, port: u16, server_data: Arc<ServerData>) -> 
         let game_tx = game_tx.clone();
 
         let _ = task::spawn(async move {
-            match handle_client(game_tx, stream, server_data).await {
-                Err(McError::PleaseDisconnect) => debug!("politely closing connection"), // not an error
-                Err(e) => error!("error handling client: {}", e),
-                _ => {}
+            if let Err(err) = handle_client(game_tx, stream, server_data).await {
+                if let McError::PleaseDisconnect = err {
+                    debug!("politely closing connection"); // not an error
+                } else {
+                    error!("error handling client: {}", err);
+                }
             }
         });
     }
