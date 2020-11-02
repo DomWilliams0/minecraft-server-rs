@@ -11,7 +11,7 @@ Current supported protocol version is [1.15.2](https://wiki.vg/index.php?title=P
 ## Roadmap
 * [X] Status/server list
 * [X] Login offline mode
-* [X] Login online mode
+* [o] Login online mode
 * [X] Join player
 * [o] Get past "Loading terrain" screen
 	* [o] Player setup (held item, recipes, player info etc)
