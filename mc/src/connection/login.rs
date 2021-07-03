@@ -5,10 +5,11 @@ use uuid::Uuid;
 
 use crate::connection::comms::{CommsRef, ResponseSink};
 use crate::connection::{ActiveState, LoginState, PlayState};
-use crate::field::*;
-use crate::packet::*;
+use crate::packet::login::{client, server::*};
+use crate::packet::DisconnectExt;
 use crate::prelude::*;
 use crate::server::{OnlineStatus, ServerData};
+use packets::types::*;
 
 fn generate_verify_token() -> McResult<Vec<u8>> {
     let mut token = vec![0u8; 2];
@@ -29,7 +30,7 @@ impl LoginState {
             match packet.id {
                 LoginStart::ID => {
                     let login_start = LoginStart::read_packet(packet).await?;
-                    let player_name = login_start.name.take();
+                    let player_name = login_start.username.take();
 
                     info!("player '{}' is joining", player_name);
                     match server_data.online_status()? {
@@ -45,10 +46,10 @@ impl LoginState {
                         OnlineStatus::Online { public_key } => {
                             let verify_token = generate_verify_token()?;
 
-                            let enc_req = EncryptionRequest {
+                            let enc_req = client::EncryptionBegin {
                                 server_id: StringField::new(SERVER_ID.to_owned()),
 
-                                pub_key: VarIntThenByteArrayField::new(public_key),
+                                public_key: VarIntThenByteArrayField::new(public_key),
                                 verify_token: VarIntThenByteArrayField::new(verify_token.clone()),
                             };
 
@@ -63,8 +64,8 @@ impl LoginState {
                         }
                     }
                 }
-                EncryptionResponse::ID => {
-                    let enc_resp = EncryptionResponse::read_packet(packet).await?;
+                EncryptionBegin::ID => {
+                    let enc_resp = EncryptionBegin::read_packet(packet).await?;
 
                     {
                         let (decrypted_token, decrypted_shared_secret, public_key) = {
@@ -113,11 +114,9 @@ impl LoginState {
         .await;
 
         if let Err(e) = &result {
-            let disconnect = Disconnect {
-                reason: ChatField::new(format!("Error: {}", e)),
-            };
+            let disconnect = client::Disconnect::with_error(e);
 
-            // ignore error
+            // ignore send error
             let _ = comms.send_response(disconnect).await;
         }
 
@@ -130,7 +129,7 @@ impl LoginState {
         self,
         player_name: String,
         player_uuid: Uuid,
-    ) -> McResult<(LoginSuccess, PlayState)> {
+    ) -> McResult<(client::Success, PlayState)> {
         let encoded_uuid = {
             let mut buf = vec![0u8; HyphenatedRef::LENGTH];
             player_uuid.to_hyphenated_ref().encode_upper(&mut buf);
@@ -139,7 +138,7 @@ impl LoginState {
             unsafe { String::from_utf8_unchecked(buf) }
         };
 
-        let response = LoginSuccess {
+        let response = client::Success {
             uuid: StringField::new(encoded_uuid),
             username: StringField::new(player_name.clone()),
         };

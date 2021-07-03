@@ -1,10 +1,9 @@
-use crate::field::*;
-use crate::packet::{ClientBound, ClientBoundPacket, PacketBody};
 use crate::prelude::*;
 use async_std::io::{Cursor, ErrorKind};
 use async_std::sync::{Arc, RwLock};
 use futures::{Sink, SinkExt};
 use openssl::symm::{encrypt, Cipher};
+use packets::types::*;
 
 pub trait ResponseSink: Sink<ClientBoundPacket> + Unpin + Send + Sync {}
 
@@ -101,6 +100,7 @@ impl<S: McStream> ActiveComms<S> {
         (r, w, enc)
     }
 
+    //noinspection RsUnresolvedReference - idk why write_all isn't found by CLion
     pub async fn send_packet(&mut self, packet: ClientBoundPacket) -> McResult<()> {
         // let enc = self.encryption.read().await;
         // let blob = enc.serialize_packet(packet)?;
@@ -113,21 +113,21 @@ impl<S: McStream> ActiveComms<S> {
             .map_err(McError::Io)
     }
 
-    //noinspection RsUnresolvedReference - idk why read_exact isn't found by the IDE
+    //noinspection RsUnresolvedReference - idk why read_exact isn't found by CLion
     pub async fn read_packet(&mut self) -> McResult<PacketBody> {
         // TODO DECRYPT STREAM?!
         let mut length = match VarIntField::read_field(&mut self.stream).await {
-            Err(McError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
+            Err(PacketError::Io(e)) if e.kind() == ErrorKind::UnexpectedEof => {
                 debug!("eof");
                 return Err(McError::PleaseDisconnect);
             }
 
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
             Ok(len) => len.value(),
         };
 
-        if length < 1 || length > 65535 {
-            return Err(McError::BadPacketLength(length as usize));
+        if !(1..=65535).contains(&length) {
+            return Err(McError::MalformedPacket(length as usize));
         }
 
         debug!("packet length={}", length);

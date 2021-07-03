@@ -1,23 +1,25 @@
-use crate::error::{McError, McResult};
-use crate::field::StringField;
-use crate::packet::{
-    ClientBoundPacket, Disconnect, HeldItemChange, JoinGame, KeepAlive, PlayerPositionAndLook,
-    SpawnPosition,
-};
+use std::hint::unreachable_unchecked;
+use std::time::Duration;
+
 use async_std::sync::Arc;
 use async_std::task;
+use async_std::task::JoinHandle;
 use chashmap::{CHashMap, WriteGuard};
 use futures::{channel::mpsc::UnboundedSender, SinkExt, StreamExt};
 use log::*;
+use packets::types::*;
+
+pub use message::{ClientMessage, ClientMessageReceiver, ClientMessageSender, ClientUuid};
+
+use crate::error::{McError, McResult};
+use crate::packet::play::client as play;
+use crate::packet::play::client::KickDisconnect;
+use crate::packet::PlayerPositionAndLookExt;
+use crate::packet::{DisconnectExt, KeepAliveExt};
 
 // TODO generic sinks
 
 mod message;
-
-use async_std::task::JoinHandle;
-pub use message::{ClientMessage, ClientMessageReceiver, ClientMessageSender, ClientUuid};
-use std::hint::unreachable_unchecked;
-use std::time::Duration;
 
 struct Client {
     outgoing: UnboundedSender<ClientBoundPacket>,
@@ -109,7 +111,7 @@ impl Game {
             loop {
                 task::sleep(Duration::from_secs(1)).await;
 
-                if let Err(err) = keep_alive_tx.send(KeepAlive::generate().into()).await {
+                if let Err(err) = keep_alive_tx.send(play::KeepAlive::generate().into()).await {
                     warn!("failed to send keep-alive: {}", err);
                     break;
                 }
@@ -178,7 +180,7 @@ impl Game {
     fn client_mut(&self, uuid: ClientUuid) -> McResult<chashmap::WriteGuard<ClientUuid, Client>> {
         self.clients
             .get_mut(&uuid)
-            .ok_or_else(|| McError::NoSuchPlayer(uuid))
+            .ok_or(McError::NoSuchPlayer(uuid))
     }
 
     // fn client(&self, uuid: ClientUuid) -> McResult<chashmap::ReadGuard<ClientUuid, Client>> {
@@ -190,9 +192,8 @@ impl Game {
 
 impl Client {
     async fn kick_with_error(&mut self, error: McError) {
-        // TODO not if politely disconnect
         if let Err(kick_error) = self
-            .send_packet(Disconnect::with_error(&error).into())
+            .send_packet(KickDisconnect::with_error(&error).into())
             .await
         {
             error!(
@@ -231,9 +232,9 @@ impl Client {
             };
         }
 
-        send!(JoinGame {
+        send!(play::Login {
             entity_id: 123.into(),
-            gamemode: 0.into(),
+            game_mode: 0.into(),
             dimension: 0.into(),
             hashed_seed: 12_345_678.into(),
             max_players: 0.into(),
@@ -243,14 +244,16 @@ impl Client {
             enable_respawn_screen: true.into(),
         });
 
-        send!(HeldItemChange { slot: 2.into() });
+        // TODO handle held item slot response
+        // send!(play::HeldItemSlot { slot: 2.into() });
 
-        send!(SpawnPosition {
-            location: (500, 64, 500).into(),
-        });
+        // TODO spawn position not implemented
+        // send!(play::SpawnPosition {
+        //     location: (500, 64, 500).into(),
+        // });
 
         let teleport_id = 1234;
-        send!(PlayerPositionAndLook::new((10.0, 100.0, 10.0), teleport_id));
+        send!(play::Position::new((10.0, 100.0, 10.0), teleport_id));
         self.set_teleport_id(teleport_id);
 
         Ok(())

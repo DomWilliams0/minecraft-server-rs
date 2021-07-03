@@ -17,5 +17,6 @@ Current supported protocol version is [1.15.2](https://wiki.vg/index.php?title=P
 	* [o] Player setup (held item, recipes, player info etc)
 	* [ ] Chunk data
 	* [X] Spawn player
+* [X] Autogenerate protocol bindings
 * [ ] Player inventory
 * [ ] ... everything else

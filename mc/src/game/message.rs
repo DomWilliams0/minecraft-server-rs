@@ -1,5 +1,5 @@
-use crate::packet::ClientBoundPacket;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use packets::types::ClientBoundPacket;
 use uuid::Uuid;
 
 pub enum ClientMessage {

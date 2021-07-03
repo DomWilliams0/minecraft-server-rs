@@ -1,11 +1,11 @@
-use crate::connection::{ActiveState, PlayState};
-use crate::field::*;
-use crate::game::{ClientMessage, ClientMessageSender};
-use crate::packet::*;
-use crate::prelude::*;
 use async_std::io::Cursor;
-
 use futures::SinkExt;
+use packets::types::*;
+
+use crate::connection::{ActiveState, PlayState};
+use crate::game::{ClientMessage, ClientMessageSender};
+use crate::prelude::*;
+use packets::types::IdentifierField;
 
 // TODO Keep Alive
 // TODO Join Game
@@ -18,20 +18,19 @@ impl PlayState {
         packet: PacketBody,
         game_broker: &mut ClientMessageSender,
     ) -> McResult<ActiveState> {
+        use crate::packet::play::{client, server::*};
         match packet.id {
-            ClientSettings::ID => {
-                let _client_settings = ClientSettings::read_packet(packet).await?;
+            Settings::ID => {
+                let _client_settings = Settings::read_packet(packet).await?;
                 // whatever
                 Ok(())
             }
 
-            PluginMessage::ID => {
-                let plugin_message = PluginMessage::read_packet(packet).await?;
+            CustomPayload::ID => {
+                let plugin_message = CustomPayload::read_packet(packet).await?;
+                let channel = IdentifierField::from(plugin_message.channel);
 
-                let value = match (
-                    plugin_message.channel.namespace(),
-                    plugin_message.channel.location(),
-                ) {
+                let value = match (channel.namespace(), channel.location()) {
                     ("minecraft", "brand") => {
                         let mut cursor = Cursor::new(&plugin_message.data.value().0);
                         let string = StringField::read_field(&mut cursor).await?;
@@ -42,8 +41,8 @@ impl PlayState {
 
                 debug!(
                     "got plugin message: namespace={}, location={}, value={}",
-                    plugin_message.channel.namespace(),
-                    plugin_message.channel.location(),
+                    channel.namespace(),
+                    channel.location(),
                     value
                 );
                 Ok(())
@@ -60,14 +59,14 @@ impl PlayState {
                 Ok(())
             }
 
-            PlayerPositionAndRotation::ID => {
-                let _pos = PlayerPositionAndRotation::read_packet(packet).await?;
+            PositionLook::ID => {
+                let _pos = PositionLook::read_packet(packet).await?;
                 // TODO actually use
                 Ok(())
             }
 
-            KeepAliveResponse::ID => {
-                let keep_alive = KeepAliveResponse::read_packet(packet).await?;
+            KeepAlive::ID => {
+                let keep_alive = KeepAlive::read_packet(packet).await?;
                 game_broker
                     .send((
                         self.uuid,

@@ -3,10 +3,11 @@ pub use comms::{ActiveComms, CommsRef};
 use crate::connection::comms::ResponseSink;
 
 use crate::game::{ClientMessage, ClientMessageSender, ClientUuid};
-use crate::packet::*;
+use crate::packet::DisconnectExt;
 use crate::prelude::*;
 use crate::server::ServerData;
 use futures::SinkExt;
+use packets::types::PacketBody;
 
 mod comms;
 mod handshake;
@@ -90,12 +91,15 @@ impl<R: ResponseSink> ConnectionState<R> {
         game_broker: &mut ClientMessageSender,
     ) -> McResult<PostPacketAction> {
         let state = std::mem::take(&mut self.state); // TODO is this safe?
+        let mut is_login = false;
 
         let mut action = PostPacketAction::default();
         let result = match state {
             ActiveState::Handshake(state) => state.handle_transaction(packet).await,
             ActiveState::Status(state) => state.handle_transaction(packet, &mut self.comms).await,
             ActiveState::Login(state) => {
+                is_login = true;
+
                 let result = state
                     .handle_transaction(packet, server_data, &mut self.comms)
                     .await;
@@ -115,8 +119,21 @@ impl<R: ResponseSink> ConnectionState<R> {
 
         match result {
             Err(err) => {
-                // ignore kick error
-                let _kick = self.comms.send_response(Disconnect::with_error(&err)).await;
+                let kick_res = if is_login {
+                    self.comms
+                        .send_response(crate::packet::login::client::Disconnect::with_error(&err))
+                        .await
+                } else {
+                    self.comms
+                        .send_response(crate::packet::play::client::KickDisconnect::with_error(
+                            &err,
+                        ))
+                        .await
+                };
+
+                if let Err(err) = kick_res {
+                    error!("failed to send kick while handling error: {}", err);
+                }
 
                 return Err(err);
             }
