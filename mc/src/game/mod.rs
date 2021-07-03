@@ -247,13 +247,12 @@ impl Client {
         // TODO handle held item slot response
         // send!(play::HeldItemSlot { slot: 2.into() });
 
-        // TODO spawn position not implemented
-        // send!(play::SpawnPosition {
-        //     location: (500, 64, 500).into(),
-        // });
+        send!(play::SpawnPosition {
+            location: PositionField::new((500, 64, -500)).unwrap(),
+        });
 
         let teleport_id = 1234;
-        send!(play::Position::new((10.0, 100.0, 10.0), teleport_id));
+        send!(play::Position::new((10.0, 100.0, -10.0), teleport_id));
         self.set_teleport_id(teleport_id);
 
         Ok(())
