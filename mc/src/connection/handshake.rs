@@ -1,6 +1,6 @@
 use crate::connection::{ActiveState, HandshakeState, LoginState, StatusState};
 use crate::prelude::*;
-use packets::types::*;
+use minecraft_server_protocol::types::*;
 
 impl HandshakeState {
     pub async fn handle_transaction(self, packet: PacketBody) -> McResult<ActiveState> {

@@ -2,8 +2,26 @@ use crate::prelude::*;
 use async_std::io::{Cursor, ErrorKind};
 use async_std::sync::{Arc, RwLock};
 use futures::{Sink, SinkExt};
+use minecraft_server_protocol::types::*;
 use openssl::symm::{encrypt, Cipher};
-use packets::types::*;
+use std::ops::Deref;
+
+// TODO arena allocator
+pub struct ClientBoundPacket(Box<dyn ClientBound>);
+
+impl<P: ClientBound + 'static> From<P> for ClientBoundPacket {
+    fn from(packet: P) -> Self {
+        Self(Box::new(packet))
+    }
+}
+
+impl Deref for ClientBoundPacket {
+    type Target = dyn ClientBound;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
 
 pub trait ResponseSink: Sink<ClientBoundPacket> + Unpin + Send + Sync {}
 

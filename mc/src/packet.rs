@@ -1,8 +1,8 @@
-use packets::v1_15_2 as mc;
+use minecraft_server_protocol::v1_15_2 as mc;
 
 use crate::error::McError;
 pub use mc::*;
-use packets::types::StringField;
+use minecraft_server_protocol::types::StringField;
 use std::borrow::Cow;
 
 pub trait DisconnectExt: Sized {

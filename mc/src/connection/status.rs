@@ -2,7 +2,7 @@ use crate::connection::comms::{CommsRef, ResponseSink};
 use crate::connection::{ActiveState, StatusState};
 use crate::packet::*;
 use crate::prelude::*;
-use packets::types::*;
+use minecraft_server_protocol::types::*;
 
 impl StatusState {
     pub async fn handle_transaction<R: ResponseSink>(

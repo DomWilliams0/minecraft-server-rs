@@ -9,7 +9,7 @@ use crate::packet::login::{client, server::*};
 use crate::packet::DisconnectExt;
 use crate::prelude::*;
 use crate::server::{OnlineStatus, ServerData};
-use packets::types::*;
+use minecraft_server_protocol::types::*;
 
 fn generate_verify_token() -> McResult<Vec<u8>> {
     let mut token = vec![0u8; 2];

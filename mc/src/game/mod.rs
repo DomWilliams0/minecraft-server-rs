@@ -7,10 +7,11 @@ use async_std::task::JoinHandle;
 use chashmap::{CHashMap, WriteGuard};
 use futures::{channel::mpsc::UnboundedSender, SinkExt, StreamExt};
 use log::*;
-use packets::types::*;
+use minecraft_server_protocol::types::*;
 
 pub use message::{ClientMessage, ClientMessageReceiver, ClientMessageSender, ClientUuid};
 
+use crate::connection::ClientBoundPacket;
 use crate::error::{McError, McResult};
 use crate::packet::play::client as play;
 use crate::packet::play::client::KickDisconnect;

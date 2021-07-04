@@ -1,4 +1,4 @@
-pub use comms::{ActiveComms, CommsRef};
+pub use comms::{ActiveComms, ClientBoundPacket, CommsRef};
 
 use crate::connection::comms::ResponseSink;
 
@@ -7,7 +7,7 @@ use crate::packet::DisconnectExt;
 use crate::prelude::*;
 use crate::server::ServerData;
 use futures::SinkExt;
-use packets::types::PacketBody;
+use minecraft_server_protocol::types::PacketBody;
 
 mod comms;
 mod handshake;

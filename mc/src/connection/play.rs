@@ -1,11 +1,11 @@
 use async_std::io::Cursor;
 use futures::SinkExt;
-use packets::types::*;
+use minecraft_server_protocol::types::*;
 
 use crate::connection::{ActiveState, PlayState};
 use crate::game::{ClientMessage, ClientMessageSender};
 use crate::prelude::*;
-use packets::types::IdentifierField;
+use minecraft_server_protocol::types::IdentifierField;
 
 // TODO Keep Alive
 // TODO Join Game

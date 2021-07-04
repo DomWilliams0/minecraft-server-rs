@@ -16,7 +16,7 @@ pub enum McError {
     Sink(#[from] SendError),
 
     #[error(transparent)]
-    Packet(#[from] packets::types::PacketError),
+    Packet(#[from] minecraft_server_protocol::types::PacketError),
 
     #[error("Unknown sink error")]
     SinkUnknown,
